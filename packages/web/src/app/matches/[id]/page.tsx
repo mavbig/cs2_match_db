@@ -63,7 +63,12 @@ export default async function MatchDetailPage({
             </Link>
           )}
         </div>
-        <MatchActions matchId={id} demoUrl={match.demo_url} />
+        <MatchActions
+          matchId={id}
+          demoUrl={match.demo_url}
+          source={match.source}
+          syncStatus={match.sync_status}
+        />
       </div>
 
       <MatchScoreboard

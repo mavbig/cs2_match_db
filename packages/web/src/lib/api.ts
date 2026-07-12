@@ -94,11 +94,19 @@ export interface MatchPlayer {
   is_me: boolean;
 }
 
+export interface MatchSyncStatus {
+  steam_synced: boolean;
+  steam_synced_at: string | null;
+  leetify_synced: boolean;
+  leetify_synced_at: string | null;
+}
+
 export interface MatchDetail extends MatchSummary {
   source_match_id: string;
   duration_seconds: number | null;
   share_code: string | null;
   demo_url: string | null;
+  sync_status: MatchSyncStatus;
   players: MatchPlayer[];
 }
 
@@ -110,6 +118,7 @@ export interface MatchSyncResult {
   map: string | null;
   score_team_a: number | null;
   score_team_b: number | null;
+  sync_status: MatchSyncStatus;
 }
 
 export interface PlayerDetail extends Player {
@@ -190,6 +199,20 @@ export const api = {
 export function formatDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString();
+}
+
+export function formatRelativeTime(iso: string | null): string {
+  if (!iso) return "unknown";
+  const then = new Date(iso).getTime();
+  const diffSec = Math.round((Date.now() - then) / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 48) return `${diffHr}h ago`;
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay < 14) return `${diffDay}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 export function formatMap(map: string | null): string {

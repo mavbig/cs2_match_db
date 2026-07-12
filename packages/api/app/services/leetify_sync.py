@@ -14,6 +14,7 @@ from app.services.match_service import (
     upsert_player,
 )
 from app.config import settings
+from app.services.enrichment import get_match_sync_status, touch_enrichment
 
 
 def extract_demo_url_from_gc(raw: dict | None) -> str | None:
@@ -158,6 +159,7 @@ async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict
     if leetify_data.get("id"):
         enrichment["leetify_game_id"] = leetify_data["id"]
     enrichment["leetify"] = leetify_data
+    enrichment["leetify_synced_at"] = datetime.now(timezone.utc).isoformat()
     payload["_enrichment"] = enrichment
     match.raw_payload = payload
 
@@ -244,6 +246,10 @@ async def sync_match_from_sources(db: AsyncSession, match_id: UUID) -> dict:
             match.score_team_b = parsed["score_team_b"]
         if parsed.get("duration_seconds"):
             match.duration_seconds = parsed["duration_seconds"]
+        match.raw_payload = touch_enrichment(
+            match.raw_payload,
+            steam_synced_at=datetime.now(timezone.utc).isoformat(),
+        )
         sources.append("gc_reparse")
 
     leetify_key = await get_setting(db, "leetify_api_key") or settings.leetify_api_key
@@ -291,4 +297,5 @@ async def sync_match_from_sources(db: AsyncSession, match_id: UUID) -> dict:
         "map": match.map,
         "score_team_a": match.score_team_a,
         "score_team_b": match.score_team_b,
+        "sync_status": get_match_sync_status(match.raw_payload, match.source),
     }

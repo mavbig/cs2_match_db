@@ -115,10 +115,80 @@ a:hover {
 
 .match-actions {
   display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.match-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.match-actions-buttons {
+  display: flex;
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
-  margin-top: 1rem;
+}
+
+.sync-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.sync-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  opacity: 0.55;
+}
+
+.sync-badge.is-synced {
+  opacity: 1;
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.sync-badge .provider-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.sync-badge.is-synced .provider-icon {
+  color: var(--accent2);
+}
+
+.sync-badge-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.sync-badge-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.sync-badge.is-synced .sync-badge-label {
+  color: var(--accent2);
+}
+
+.sync-badge-time {
+  font-size: 0.78rem;
+  color: var(--text);
 }
 
 .match-actions-status {
@@ -172,6 +242,39 @@ a:hover {
 .team-header.team-b {
   background: rgba(255, 140, 66, 0.12);
   color: #ffc299;
+}
+
+.team-header.team-win {
+  background: rgba(52, 211, 153, 0.2);
+  color: #86efac;
+  border-bottom-color: rgba(52, 211, 153, 0.35);
+}
+
+.team-header.team-loss {
+  background: rgba(255, 107, 107, 0.2);
+  color: #fca5a5;
+  border-bottom-color: rgba(255, 107, 107, 0.35);
+}
+
+.team-header.team-draw {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fcd34d;
+  border-bottom-color: rgba(251, 191, 36, 0.35);
+}
+
+.team-panel.team-win {
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.04);
+}
+
+.team-panel.team-loss {
+  border-color: rgba(255, 107, 107, 0.35);
+  background: rgba(255, 107, 107, 0.04);
+}
+
+.team-panel.team-draw {
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.04);
 }
 
 .team-score {

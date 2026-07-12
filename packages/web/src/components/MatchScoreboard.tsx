@@ -11,6 +11,22 @@ function sortPlayers(players: MatchPlayer[]): MatchPlayer[] {
   });
 }
 
+type TeamOutcome = "win" | "loss" | "draw" | null;
+
+function teamOutcome(score: number | null, opponentScore: number | null): TeamOutcome {
+  if (score == null || opponentScore == null) return null;
+  if (score > opponentScore) return "win";
+  if (score < opponentScore) return "loss";
+  return "draw";
+}
+
+function outcomeClass(outcome: TeamOutcome): string {
+  if (outcome === "win") return "team-win";
+  if (outcome === "loss") return "team-loss";
+  if (outcome === "draw") return "team-draw";
+  return "";
+}
+
 function PlayerTable({
   players,
   showPing,
@@ -84,6 +100,9 @@ export function MatchScoreboard({ players, scoreTeamA, scoreTeamB, source, isFac
     return team === "team_a" ? "Team A" : "Team B";
   };
 
+  const outcomeA = teamOutcome(scoreTeamA, scoreTeamB);
+  const outcomeB = teamOutcome(scoreTeamB, scoreTeamA);
+
   if (!hasTeams) {
     const sorted = sortPlayers(players);
     return (
@@ -115,15 +134,15 @@ export function MatchScoreboard({ players, scoreTeamA, scoreTeamB, source, isFac
         </p>
       )}
       <div className="scoreboard-grid">
-        <div className="team-panel team-a">
-          <div className="team-header team-a">
+        <div className={`team-panel team-a ${outcomeClass(outcomeA)}`}>
+          <div className={`team-header team-a ${outcomeClass(outcomeA)}`}>
             <span>{teamLabel("team_a")}</span>
             {scoreTeamA != null && <span className="team-score">{scoreTeamA}</span>}
           </div>
           <PlayerTable players={teamA} showPing={showPing} teamClass="team-a" />
         </div>
-        <div className="team-panel team-b">
-          <div className="team-header team-b">
+        <div className={`team-panel team-b ${outcomeClass(outcomeB)}`}>
+          <div className={`team-header team-b ${outcomeClass(outcomeB)}`}>
             <span>{teamLabel("team_b")}</span>
             {scoreTeamB != null && <span className="team-score">{scoreTeamB}</span>}
           </div>

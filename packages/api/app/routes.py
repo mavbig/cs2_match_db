@@ -28,6 +28,7 @@ from app.schemas import (
     ShareCodeImportIn,
     SyncJobOut,
     SyncStatusOut,
+    MatchSyncStatusOut,
 )
 from app.services.match_service import (
     create_sync_job,
@@ -45,6 +46,7 @@ from app.services.match_service import (
     set_setting,
     upsert_player,
 )
+from app.services.enrichment import get_match_sync_status
 from app.services.leetify_sync import extract_demo_url_from_gc, sync_match_from_sources
 from app.services.steam_client import SteamClient
 
@@ -96,6 +98,7 @@ def _match_to_out(match: Match) -> MatchOut:
         duration_seconds=match.duration_seconds,
         share_code=match.share_code,
         demo_url=extract_demo_url_from_gc(match.raw_payload),
+        sync_status=MatchSyncStatusOut(**get_match_sync_status(match.raw_payload, match.source)),
         players=players,
     )
 

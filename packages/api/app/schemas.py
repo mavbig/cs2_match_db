@@ -18,6 +18,13 @@ class MatchPlayerIn(BaseModel):
     is_me: bool = False
 
 
+class MatchSyncStatusOut(BaseModel):
+    steam_synced: bool = False
+    steam_synced_at: datetime | None = None
+    leetify_synced: bool = False
+    leetify_synced_at: datetime | None = None
+
+
 class MatchIngestIn(BaseModel):
     source: str = "steam_gc"
     source_match_id: str
@@ -65,6 +72,7 @@ class MatchOut(BaseModel):
     duration_seconds: int | None
     share_code: str | None
     demo_url: str | None = None
+    sync_status: MatchSyncStatusOut = Field(default_factory=MatchSyncStatusOut)
     players: list[MatchPlayerOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

@@ -18,6 +18,7 @@ from app.models import (
     SyncJob,
 )
 from app.schemas import MatchIngestIn, MatchPlayerIn
+from app.services.enrichment import touch_enrichment
 from app.services.steam_client import SteamClient
 
 
@@ -128,6 +129,12 @@ async def ingest_match(
     created = match is None
 
     if match is None:
+        payload = data.raw_payload
+        if payload is not None:
+            payload = touch_enrichment(
+                payload,
+                steam_synced_at=datetime.now(timezone.utc).isoformat(),
+            )
         match = Match(
             source=data.source,
             source_match_id=data.source_match_id,
@@ -138,7 +145,7 @@ async def ingest_match(
             score_team_b=data.score_team_b,
             duration_seconds=data.duration_seconds,
             share_code=data.share_code,
-            raw_payload=data.raw_payload,
+            raw_payload=payload,
         )
         db.add(match)
         await db.flush()
@@ -158,7 +165,11 @@ async def ingest_match(
         if data.share_code:
             match.share_code = data.share_code
         if data.raw_payload:
-            match.raw_payload = data.raw_payload
+            payload = touch_enrichment(
+                data.raw_payload,
+                steam_synced_at=datetime.now(timezone.utc).isoformat(),
+            )
+            match.raw_payload = payload
 
     my_steam64 = await get_my_steam64_id(db)
 

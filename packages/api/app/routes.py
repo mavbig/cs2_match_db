@@ -47,7 +47,7 @@ from app.services.match_service import (
     upsert_player,
 )
 from app.services.enrichment import get_match_sync_status
-from app.services.leetify_sync import extract_demo_url_from_gc, sync_match_from_sources
+from app.services.leetify_sync import extract_demo_url_from_gc, import_leetify_profile, sync_match_from_sources
 from app.services.steam_client import SteamClient
 
 router = APIRouter(prefix="/api/v1", tags=["api"])
@@ -521,7 +521,7 @@ async def update_settings(body: SettingsUpdateIn, db: AsyncSession = Depends(get
 
 @router.post("/sync/trigger/{job_type}", response_model=SyncJobOut)
 async def trigger_sync(job_type: str, db: AsyncSession = Depends(get_db)):
-    if job_type not in ("steam_gc", "faceit", "enrichment", "leetify"):
+    if job_type not in ("steam_gc", "faceit", "enrichment", "leetify", "leetify_import"):
         raise HTTPException(status_code=400, detail="Invalid job type")
     job = await create_sync_job(db, job_type)
 
@@ -536,11 +536,27 @@ async def trigger_sync(job_type: str, db: AsyncSession = Depends(get_db)):
             await arq_redis.enqueue_job("sync_faceit_matches")
         elif job_type == "leetify":
             await arq_redis.enqueue_job("sync_leetify_matches")
+        elif job_type == "leetify_import":
+            await arq_redis.enqueue_job("import_leetify_profile")
         await arq_redis.aclose()
     except Exception:
         pass
 
     return SyncJobOut.model_validate(job)
+
+
+@router.post("/import/leetify")
+async def import_leetify(db: AsyncSession = Depends(get_db)):
+    my_steam64 = await get_my_steam64_id(db)
+    if not my_steam64:
+        raise HTTPException(status_code=400, detail="Configure your Steam64 ID in settings first")
+    leetify_key = await get_setting(db, "leetify_api_key") or settings.leetify_api_key
+    if not leetify_key:
+        raise HTTPException(status_code=400, detail="Leetify API key not configured")
+
+    result = await import_leetify_profile(db, my_steam64, leetify_key)
+    await db.commit()
+    return result
 
 
 @router.get("/sync/jobs", response_model=list[SyncJobOut])

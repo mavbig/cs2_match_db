@@ -661,7 +661,8 @@ async def sync_faceit_matches(ctx):
                 player = resp.json()
 
                 offset = 0
-                while offset < 100:
+                max_matches = 2000
+                while offset < max_matches:
                     hist_resp = await client.get(
                         f"{FACEIT_BASE}/players/{player['player_id']}/history",
                         params={"game": "cs2", "offset": offset, "limit": 20},
@@ -786,9 +787,35 @@ async def sync_leetify_matches(ctx):
     logger.info("Leetify bulk sync finished: %d ok, %d failed, %d total", synced, failed, len(match_ids))
 
 
+async def import_leetify_profile(ctx):
+    async with httpx.AsyncClient(base_url=settings.api_internal_url, timeout=600.0) as client:
+        try:
+            resp = await client.post("/api/v1/import/leetify")
+            if resp.is_success:
+                result = resp.json()
+                logger.info(
+                    "Leetify profile import: %d total, %d new, %d updated, %d failed",
+                    result.get("total", 0),
+                    result.get("imported", 0),
+                    result.get("updated", 0),
+                    result.get("failed", 0),
+                )
+            else:
+                logger.warning("Leetify profile import HTTP %s: %s", resp.status_code, resp.text[:300])
+        except Exception:
+            logger.exception("Leetify profile import failed")
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [enrich_player, sync_faceit_matches, process_enrichment_jobs, run_enrichment_batch, sync_leetify_matches]
+    functions = [
+        enrich_player,
+        sync_faceit_matches,
+        process_enrichment_jobs,
+        run_enrichment_batch,
+        sync_leetify_matches,
+        import_leetify_profile,
+    ]
     cron_jobs = [
         cron(sync_faceit_matches, hour={0, 6, 12, 18}, minute=0),
         cron(process_enrichment_jobs, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),

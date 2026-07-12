@@ -49,8 +49,13 @@ class LeetifyClient:
         data, _, _ = await self._get_json("/v3/profile", params={"steam64_id": steam64_id})
         return data if isinstance(data, dict) else None
 
-    async def get_profile_matches(self, steam64_id: str) -> list[dict] | None:
-        data, status, err = await self._get_json("/v3/profile/matches", params={"steam64_id": steam64_id})
+    async def get_profile_matches(self, steam64_id: str, *, limit: int | None = None, offset: int = 0) -> list[dict] | None:
+        params: dict = {"steam64_id": steam64_id}
+        if limit is not None:
+            params["limit"] = limit
+        if offset:
+            params["offset"] = offset
+        data, status, err = await self._get_json("/v3/profile/matches", params=params)
         if data is None:
             if status >= 500:
                 logger.warning("Leetify profile/matches failed for %s: %s", steam64_id, err)
@@ -62,6 +67,35 @@ class LeetifyClient:
             if isinstance(matches, list):
                 return matches
         return None
+
+    async def get_all_profile_matches(self, steam64_id: str) -> list[dict] | None:
+        page_size = 100
+        offset = 0
+        collected: list[dict] = []
+        seen_ids: set[str] = set()
+
+        while offset < 50_000:
+            page = await self.get_profile_matches(steam64_id, limit=page_size, offset=offset)
+            if page is None:
+                return collected if collected else None
+            if not page:
+                break
+
+            added = 0
+            for entry in page:
+                entry_id = str(entry.get("id") or "")
+                if entry_id and entry_id in seen_ids:
+                    continue
+                if entry_id:
+                    seen_ids.add(entry_id)
+                collected.append(entry)
+                added += 1
+
+            if added == 0 or len(page) < page_size:
+                break
+            offset += page_size
+
+        return collected
 
     async def get_match_by_game_id(self, game_id: str) -> tuple[dict | None, str | None]:
         encoded_id = quote(game_id, safe="")
@@ -104,7 +138,7 @@ class LeetifyClient:
                 notes.append(err)
 
         if my_steam64_id:
-            history = await self.get_profile_matches(my_steam64_id)
+            history = await self.get_all_profile_matches(my_steam64_id)
             if history is None:
                 notes.append("profile/matches unavailable")
             else:

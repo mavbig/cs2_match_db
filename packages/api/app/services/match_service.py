@@ -128,6 +128,12 @@ async def ingest_match(
     match = existing.scalar_one_or_none()
     created = match is None
 
+    if match is None and data.share_code:
+        by_share = await db.execute(select(Match).where(Match.share_code == data.share_code))
+        match = by_share.scalar_one_or_none()
+        if match is not None:
+            created = False
+
     if match is None:
         payload = data.raw_payload
         if payload is not None:
@@ -165,10 +171,18 @@ async def ingest_match(
         if data.share_code:
             match.share_code = data.share_code
         if data.raw_payload:
+            existing_payload = dict(match.raw_payload or {})
+            existing_enrichment = dict(existing_payload.get("_enrichment") or {})
             payload = touch_enrichment(
                 data.raw_payload,
                 steam_synced_at=datetime.now(timezone.utc).isoformat(),
             )
+            merged_enrichment = dict(payload.get("_enrichment") or {})
+            merged_enrichment = {**existing_enrichment, **merged_enrichment}
+            payload["_enrichment"] = merged_enrichment
+            if match.source == "leetify" and data.source == "steam_gc":
+                merged_enrichment["steam_gc_match_id"] = data.source_match_id
+                payload["_enrichment"] = merged_enrichment
             match.raw_payload = payload
 
     my_steam64 = await get_my_steam64_id(db)

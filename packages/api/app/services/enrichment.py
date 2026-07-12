@@ -29,7 +29,7 @@ def get_match_sync_status(raw: dict | None, source: str) -> dict:
     steam_synced = steam_at is not None or (
         source == "steam_gc" and bool(raw and (raw.get("matchid") or raw.get("roundstatsall")))
     )
-    leetify_synced = leetify_at is not None or bool(leetify_data)
+    leetify_synced = leetify_at is not None or bool(leetify_data) or source == "leetify"
 
     if leetify_synced and leetify_at is None:
         leetify_at = parse_sync_timestamp(

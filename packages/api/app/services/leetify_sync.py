@@ -1,8 +1,11 @@
+import logging
 import re
 from datetime import datetime, timezone
 from uuid import UUID
 
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import Match, MatchPlayer
 from app.services.leetify_client import LeetifyClient
@@ -15,6 +18,8 @@ from app.services.match_service import (
 )
 from app.config import settings
 from app.services.enrichment import get_match_sync_status, touch_enrichment
+
+logger = logging.getLogger(__name__)
 
 
 def extract_demo_url_from_gc(raw: dict | None) -> str | None:
@@ -208,7 +213,13 @@ async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict
     if not stats:
         return
 
-    _restore_teams_from_gc(match)
+    has_gc_teams = (
+        match.source == "steam_gc"
+        and bool(match.raw_payload)
+        and bool(match.raw_payload.get("roundstatsall"))
+    )
+    if has_gc_teams:
+        _restore_teams_from_gc(match)
 
     team_map = _team_number_map(stats, my_steam64)
     steam_ids = [
@@ -246,6 +257,8 @@ async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict
             )
             db.add(mp)
             mp_by_steam[steam64] = mp
+        elif not has_gc_teams and team:
+            mp.team = team
         elif team and not mp.team:
             mp.team = team
 
@@ -341,4 +354,128 @@ async def sync_match_from_sources(db: AsyncSession, match_id: UUID) -> dict:
         "score_team_a": match.score_team_a,
         "score_team_b": match.score_team_b,
         "sync_status": get_match_sync_status(match.raw_payload, match.source),
+    }
+
+
+def _leetify_match_identity(leetify_data: dict) -> tuple[str, str, str | None, str | None]:
+    data_source = (leetify_data.get("data_source") or "").lower()
+    ds_id = leetify_data.get("data_source_match_id")
+    leetify_id = str(leetify_data.get("id") or "")
+    share_code = None
+    if ds_id and str(ds_id).upper().startswith("CSGO-"):
+        share_code = str(ds_id)
+
+    mode = None
+    if data_source == "matchmaking_competitive":
+        mode = "premier"
+    elif data_source == "matchmaking":
+        mode = "competitive"
+    elif data_source == "faceit":
+        mode = "faceit"
+    elif data_source == "renown":
+        mode = "renown"
+
+    if data_source == "faceit" and ds_id:
+        return "faceit", str(ds_id), None, mode
+    if leetify_id:
+        return "leetify", leetify_id, share_code, mode
+    return "leetify", str(ds_id or "unknown"), share_code, mode
+
+
+async def find_match_for_leetify(db: AsyncSession, leetify_data: dict) -> Match | None:
+    leetify_id = leetify_data.get("id")
+    data_source = (leetify_data.get("data_source") or "").lower()
+    ds_id = leetify_data.get("data_source_match_id")
+    share_code = None
+    if ds_id and str(ds_id).upper().startswith("CSGO-"):
+        share_code = str(ds_id)
+
+    conditions = []
+    if leetify_id:
+        lid = str(leetify_id)
+        conditions.append(Match.raw_payload["_enrichment"]["leetify_game_id"].astext == lid)
+        conditions.append(Match.raw_payload["_enrichment"]["leetify"]["id"].astext == lid)
+        conditions.append((Match.source == "leetify") & (Match.source_match_id == lid))
+    if share_code:
+        conditions.append(Match.share_code == share_code)
+    if data_source == "faceit" and ds_id:
+        conditions.append((Match.source == "faceit") & (Match.source_match_id == str(ds_id)))
+
+    if not conditions:
+        return None
+
+    result = await db.execute(
+        select(Match)
+        .options(selectinload(Match.players).selectinload(MatchPlayer.player))
+        .where(or_(*conditions))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_match_from_leetify(db: AsyncSession, leetify_data: dict, my_steam64: str) -> Match:
+    source, source_match_id, share_code, mode = _leetify_match_identity(leetify_data)
+    map_name = leetify_data.get("map_name") or leetify_data.get("mapName")
+    finished_at = _parse_leetify_datetime(leetify_data.get("finished_at") or leetify_data.get("finishedAt"))
+    stats = leetify_data.get("stats") or []
+    team_scores = leetify_data.get("team_scores") or leetify_data.get("teamScores") or []
+    score_a, score_b = _map_leetify_scores(team_scores, stats, my_steam64)
+
+    match = Match(
+        source=source,
+        source_match_id=source_match_id,
+        map=str(map_name).lower() if map_name else None,
+        mode=mode,
+        played_at=finished_at,
+        score_team_a=score_a,
+        score_team_b=score_b,
+        share_code=share_code,
+        raw_payload={"_source": "leetify_import", "_enrichment": {}},
+    )
+    db.add(match)
+    await db.flush()
+    await apply_leetify_match(db, match, leetify_data)
+    return match
+
+
+async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str) -> dict:
+    client = LeetifyClient(api_key)
+    entries = await client.get_all_profile_matches(steam64_id)
+    if entries is None:
+        return {
+            "total": 0,
+            "imported": 0,
+            "updated": 0,
+            "failed": 0,
+            "error": "Could not fetch Leetify profile matches (check API key and profile privacy)",
+        }
+
+    imported = 0
+    updated = 0
+    failed = 0
+
+    for entry in entries:
+        try:
+            data = entry
+            if not entry.get("stats") and entry.get("id"):
+                full, _ = await client.get_match_by_game_id(str(entry["id"]))
+                if full:
+                    data = full
+
+            existing = await find_match_for_leetify(db, data)
+            if existing:
+                await apply_leetify_match(db, existing, data)
+                updated += 1
+            else:
+                await create_match_from_leetify(db, data, steam64_id)
+                imported += 1
+        except Exception:
+            logger.exception("Failed to import Leetify match %s", entry.get("id"))
+            failed += 1
+
+    return {
+        "total": len(entries),
+        "imported": imported,
+        "updated": updated,
+        "failed": failed,
     }

@@ -219,15 +219,22 @@ export default function SettingsPage() {
             Trigger Steam Sync
           </button>
           <button type="button" className="btn" onClick={() => triggerSync("faceit")}>
-            Trigger FACEIT Sync
+            Sync FACEIT (up to 2000)
           </button>
           <button type="button" className="btn" onClick={() => triggerSync("enrichment")}>
             Trigger Enrichment
           </button>
           <button type="button" className="btn" onClick={() => triggerSync("leetify")}>
-            Sync Leetify (all matches)
+            Enrich existing matches (Leetify)
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => triggerSync("leetify_import")}>
+            Import all from Leetify
           </button>
         </div>
+        <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
+          Leetify import pulls your full match history (Premier, MM, FACEIT) and stores the complete Leetify payload
+          in the database. Use &quot;Enrich existing&quot; to refresh stats on matches already in the DB.
+        </p>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>
           <input

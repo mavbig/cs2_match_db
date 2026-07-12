@@ -323,6 +323,7 @@ async def list_player_matches(
             PlayerMatchOut(
                 id=match.id,
                 source=match.source,
+                source_match_id=match.source_match_id,
                 map=match.map,
                 mode=match.mode,
                 played_at=match.played_at,

@@ -1,3 +1,5 @@
+import { countryFlag, countryLabel } from "@/lib/country";
+
 export interface FaceitStatBlock {
   matches?: number | null;
   win_rate_pct?: number | null;
@@ -135,7 +137,11 @@ export function FaceitProfile({ faceit }: { faceit: FaceitProfileStats }) {
             {faceit.skill_level != null && <span className="badge badge-blue">Lvl {faceit.skill_level}</span>}
             {faceit.elo != null && <span className="badge">{faceit.elo} ELO</span>}
             {faceit.verified && <span className="badge badge-green">Verified</span>}
-            {faceit.country && <span className="badge">{faceit.country}</span>}
+            {faceit.country && (
+              <span className="badge" title={countryLabel(faceit.country)}>
+                {countryFlag(faceit.country)} {countryLabel(faceit.country)}
+              </span>
+            )}
           </div>
         </div>
       </div>

@@ -49,6 +49,15 @@ export interface MatchSummary {
   player_count: number;
 }
 
+export interface PlayerMatch extends MatchSummary {
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+  mvps: number | null;
+  headshot_pct: number | null;
+  score: number | null;
+}
+
 export interface MatchPlayer {
   player_id: string;
   steam64_id: string;
@@ -121,6 +130,8 @@ export const api = {
   match: (id: string) => fetchApi<MatchDetail>(`/api/v1/matches/${id}`),
   searchPlayers: (q: string) => fetchApi<{ players: Player[] }>(`/api/v1/players?q=${encodeURIComponent(q)}`),
   player: (id: string) => fetchApi<PlayerDetail>(`/api/v1/players/${id}`),
+  playerMatches: (id: string, limit = 100, offset = 0) =>
+    fetchApi<PlayerMatch[]>(`/api/v1/players/${id}/matches?limit=${limit}&offset=${offset}`),
   playedWith: (steam64: string) => fetchApi<PlayedWith>(`/api/v1/players/by-steam/${steam64}/played-with`),
   lookupPlayer: (steam_url_or_id: string) =>
     fetchApi<PlayerDetail>("/api/v1/players/lookup", {

@@ -82,6 +82,15 @@ class MatchSummaryOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PlayerMatchOut(MatchSummaryOut):
+    kills: int | None = None
+    deaths: int | None = None
+    assists: int | None = None
+    mvps: int | None = None
+    headshot_pct: float | None = None
+    score: int | None = None
+
+
 class PlayerOut(BaseModel):
     id: UUID
     steam64_id: str

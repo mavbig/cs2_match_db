@@ -20,6 +20,7 @@ from app.schemas import (
     PlayedWithOut,
     PlayerDetailOut,
     PlayerLookupIn,
+    PlayerMatchOut,
     PlayerOut,
     SearchResultOut,
     SettingsOut,
@@ -32,6 +33,7 @@ from app.services.match_service import (
     create_sync_job,
     get_match_with_players,
     get_my_steam64_id,
+    get_player_matches,
     get_played_with_stats,
     get_player_detail,
     get_setting,
@@ -197,6 +199,41 @@ async def get_player(player_id: UUID, db: AsyncSession = Depends(get_db)):
         match_count=match_count,
         times_played_with_me=played["times_together"] if played else None,
     )
+
+
+@router.get("/players/{player_id}/matches", response_model=list[PlayerMatchOut])
+async def list_player_matches(
+    player_id: UUID,
+    limit: int = Query(100, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await db.get(Player, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    rows = await get_player_matches(db, player_id, limit=limit, offset=offset)
+    out: list[PlayerMatchOut] = []
+    for match, mp in rows:
+        out.append(
+            PlayerMatchOut(
+                id=match.id,
+                source=match.source,
+                map=match.map,
+                mode=match.mode,
+                played_at=match.played_at,
+                score_team_a=match.score_team_a,
+                score_team_b=match.score_team_b,
+                player_count=len(match.players) if match.players else 0,
+                kills=mp.kills,
+                deaths=mp.deaths,
+                assists=mp.assists,
+                mvps=mp.mvps,
+                headshot_pct=mp.headshot_pct,
+                score=mp.score,
+            )
+        )
+    return out
 
 
 @router.get("/players/by-steam/{steam64_id}/played-with", response_model=PlayedWithOut)

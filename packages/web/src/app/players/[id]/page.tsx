@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FaceitProfile, FaceitProfileStats } from "@/components/FaceitProfile";
-import { api, formatDate } from "@/lib/api";
+import { api, formatDate, formatMap, PlayerMatch } from "@/lib/api";
 
 export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   let player;
+  let matches: PlayerMatch[] = [];
   try {
-    player = await api.player(id);
+    [player, matches] = await Promise.all([api.player(id), api.playerMatches(id, 200)]);
   } catch {
     notFound();
   }
@@ -107,6 +108,56 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
       )}
+
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>
+          Match History
+          {player.match_count > 0 && (
+            <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: "0.9rem", marginLeft: "0.5rem" }}>
+              ({player.match_count} in database
+              {matches.length < player.match_count ? `, showing ${matches.length}` : ""})
+            </span>
+          )}
+        </h2>
+        {matches.length === 0 ? (
+          <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>No matches indexed for this player yet.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Map</th>
+                <th>Score</th>
+                <th>K</th>
+                <th>A</th>
+                <th>D</th>
+                <th>HS%</th>
+                <th>Date</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matches.map((m) => (
+                <tr key={m.id}>
+                  <td>
+                    <Link href={`/matches/${m.id}`}>{formatMap(m.map)}</Link>
+                  </td>
+                  <td>
+                    {m.score_team_a ?? "?"} : {m.score_team_b ?? "?"}
+                  </td>
+                  <td>{m.kills ?? "—"}</td>
+                  <td>{m.assists ?? "—"}</td>
+                  <td>{m.deaths ?? "—"}</td>
+                  <td>{m.headshot_pct != null ? `${Math.round(m.headshot_pct)}%` : "—"}</td>
+                  <td style={{ color: "var(--muted)", fontSize: "0.85rem" }}>{formatDate(m.played_at)}</td>
+                  <td>
+                    <span className="badge">{m.source}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="card">
         <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>First / Last Seen</h2>

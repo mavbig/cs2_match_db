@@ -191,6 +191,24 @@ async def get_match_with_players(db: AsyncSession, match_id: UUID) -> Match | No
     return result.scalar_one_or_none()
 
 
+async def get_player_matches(
+    db: AsyncSession,
+    player_id: UUID,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[tuple[Match, MatchPlayer]]:
+    result = await db.execute(
+        select(Match, MatchPlayer)
+        .join(MatchPlayer, MatchPlayer.match_id == Match.id)
+        .where(MatchPlayer.player_id == player_id)
+        .options(selectinload(Match.players))
+        .order_by(Match.played_at.desc().nullslast())
+        .offset(offset)
+        .limit(limit)
+    )
+    return list(result.all())
+
+
 async def search_players(db: AsyncSession, query: str, limit: int = 20) -> list[Player]:
     q = query.strip()
     steam64, vanity = parse_steam_input(q)

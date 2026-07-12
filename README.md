@@ -82,7 +82,7 @@ When **your** matches sync, all **9 other players** in each game are saved autom
 | Button | What it does |
 |--------|----------------|
 | **Trigger Steam Sync** | Creates a sync job record. The actual Steam import is performed by the **steam-sync** container, which runs automatically on a timer. If matches aren't appearing, check `docker compose logs steam-sync`. |
-| **Trigger FACEIT Sync** | Immediately queues a job to pull **your** FACEIT match history (requires FACEIT API key + nickname in Settings). |
+| **Trigger FACEIT Sync** | Fetches **your** FACEIT match history with full map, score, and player scoreboards (requires FACEIT API key + nickname). Re-run to refresh existing stub matches. |
 | **Trigger Enrichment** | Refreshes **stats** for known players (Leetify aim ratings, FACEIT ELO, Steam avatars). Does not import new matches. |
 | **Import Share Code** | Paste a single match code (`CSGO-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`) from CS2 → Watch → Your Matches to import that one game. |
 

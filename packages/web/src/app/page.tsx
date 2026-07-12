@@ -24,8 +24,8 @@ export default async function DashboardPage() {
   return (
     <div>
       <div style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ fontSize: "1.75rem", fontWeight: 700 }}>Dashboard</h1>
-        <p style={{ color: "var(--muted)", marginTop: "0.25rem" }}>
+        <h1 className="page-title">Dashboard</h1>
+        <p className="page-subtitle" style={{ marginBottom: 0 }}>
           Your CS2 match history and player database
         </p>
       </div>

@@ -13,7 +13,7 @@ import {
   getSharedSecret,
   loadMaFile,
 } from "./mafile.js";
-import { normalizeGcMatch, parseShareCode } from "./match-parser.js";
+import { normalizeGcMatch, parseShareCode, buildGcParseDebug } from "./match-parser.js";
 import type { NormalizedMatch } from "./match-parser.js";
 import { getNextMatchSharingCode, ShareCodeChainEnd } from "./steam-api.js";
 
@@ -344,6 +344,9 @@ export class GcClient extends EventEmitter {
         }
 
         const normalized = normalizeGcMatch(matches[0], currentCode, mySteam64Id);
+        if (GC_DEBUG && matches[0]) {
+          console.log(`[steam-sync] Parse debug ${currentCode}:`, JSON.stringify(buildGcParseDebug(matches[0])));
+        }
         if (normalized) {
           results.push(normalized);
           count++;

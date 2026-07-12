@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -14,46 +15,85 @@ export function Nav() {
   const pathname = usePathname();
 
   return (
-    <header
-      style={{
-        borderBottom: "1px solid var(--border)",
-        background: "var(--surface)",
-        position: "sticky",
-        top: 0,
-        zIndex: 50,
-      }}
-    >
-      <div
-        className="container"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          height: "3.5rem",
-        }}
-      >
-        <Link href="/" style={{ fontWeight: 700, fontSize: "1.1rem", color: "var(--text)" }}>
-          CS2 Match DB
+    <header className="site-header">
+      <div className="container site-header-inner">
+        <Link href="/" className="brand-link">
+          <Image
+            src="/logo_with_name.png"
+            alt="CS2 Match DB"
+            width={180}
+            height={40}
+            priority
+            style={{ height: "36px", width: "auto" }}
+          />
         </Link>
-        <nav style={{ display: "flex", gap: "0.25rem" }}>
-          {links.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              style={{
-                padding: "0.4rem 0.85rem",
-                borderRadius: "6px",
-                color: pathname === l.href ? "var(--accent)" : "var(--muted)",
-                background: pathname === l.href ? "var(--surface2)" : "transparent",
-                fontWeight: pathname === l.href ? 600 : 400,
-                fontSize: "0.9rem",
-              }}
-            >
-              {l.label}
-            </Link>
-          ))}
+        <nav className="site-nav">
+          {links.map((l) => {
+            const active = pathname === l.href || (l.href !== "/" && pathname.startsWith(l.href));
+            return (
+              <Link key={l.href} href={l.href} className={`nav-link${active ? " is-active" : ""}`}>
+                {l.label}
+              </Link>
+            );
+          })}
         </nav>
       </div>
+      <style jsx>{`
+        .site-header {
+          border-bottom: 1px solid var(--border);
+          background: rgba(17, 24, 32, 0.85);
+          backdrop-filter: blur(12px);
+          position: sticky;
+          top: 0;
+          z-index: 50;
+        }
+        .site-header-inner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          height: 4rem;
+          gap: 1rem;
+        }
+        .brand-link {
+          display: flex;
+          align-items: center;
+          flex-shrink: 0;
+        }
+        .brand-link:hover {
+          opacity: 0.92;
+        }
+        .site-nav {
+          display: flex;
+          gap: 0.25rem;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+        .nav-link {
+          padding: 0.45rem 0.9rem;
+          border-radius: var(--radius);
+          color: var(--muted);
+          font-size: 0.9rem;
+          font-weight: 500;
+          transition: background 0.15s, color 0.15s;
+        }
+        .nav-link:hover {
+          color: var(--text);
+          background: var(--surface2);
+        }
+        .nav-link.is-active {
+          color: var(--accent);
+          background: rgba(59, 158, 255, 0.1);
+          font-weight: 600;
+        }
+        @media (max-width: 640px) {
+          .site-header-inner {
+            flex-direction: column;
+            height: auto;
+            padding-top: 0.75rem;
+            padding-bottom: 0.75rem;
+          }
+        }
+      `}</style>
     </header>
   );
 }

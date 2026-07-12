@@ -33,7 +33,18 @@ export interface NormalizedMatch {
   players: NormalizedPlayer[];
 }
 
-/** Known CS2 matchmaking map IDs from GC round stats (map_id field). */
+export interface GcParseDebug {
+  roundstats_count: number;
+  picked_round: number | null;
+  picked_team_scores: number[];
+  game_type: number | null;
+  rank_type_ids: number[];
+  watchable_game_map: string | null;
+  final_map_field: string | null;
+  final_map_id: number | null;
+}
+
+/** CS2 GC map_id → map name (active duty pool + common reserves). */
 const CS2_MAP_IDS: Record<number, string> = {
   1: "de_dust2",
   2: "de_mirage",
@@ -55,7 +66,15 @@ const CS2_MAP_IDS: Record<number, string> = {
   18: "de_jura",
   19: "de_boyard",
   20: "de_chalice",
+  21: "de_basalt",
+  22: "de_edin",
+  23: "de_palacio",
+  24: "de_assembly",
+  25: "de_memento",
 };
+
+const PREMIER_GAME_TYPE = 1048584; // 0x100008
+const PREMIER_RANK_TYPE_ID = 11;
 
 export function accountIdToSteam64(accountId: number): string {
   return (BigInt(accountId) + 76561197960265728n).toString();
@@ -92,18 +111,19 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function teamScoreTotal(entry: Record<string, unknown>): number {
+  const scores = (entry.team_scores as number[]) ?? [];
+  if (scores.length < 2) return 0;
+  return scores[0] + scores[1];
+}
+
 function pickFinalRoundStats(match: Record<string, unknown>): Record<string, unknown> {
   const all = (match.roundstatsall as Record<string, unknown>[]) ?? [];
   if (all.length) {
-    const withMatchResult = all.filter((entry) => entry.match_result != null && entry.match_result !== 0);
-    if (withMatchResult.length) {
-      return withMatchResult[withMatchResult.length - 1];
-    }
-
-    const byRound = [...all].sort(
-      (a, b) => Number(b.round ?? 0) - Number(a.round ?? 0)
-    );
-    return byRound[0] ?? all[all.length - 1];
+    const withMeaningfulScore = all.filter((entry) => teamScoreTotal(entry) >= 8);
+    const pool = withMeaningfulScore.length ? withMeaningfulScore : all;
+    const sorted = [...pool].sort((a, b) => Number(b.round ?? 0) - Number(a.round ?? 0));
+    return sorted[0] ?? all[all.length - 1];
   }
 
   return asRecord(match.roundstats_legacy) ?? {};
@@ -123,6 +143,11 @@ function extractMapName(
   for (const entry of [...allRoundStats].reverse()) {
     const map = normalizeMapToken(String(entry.map ?? ""));
     if (map) return map;
+
+    const mapId = Number(entry.map_id ?? 0);
+    if (mapId && CS2_MAP_IDS[mapId]) {
+      return CS2_MAP_IDS[mapId];
+    }
   }
 
   const map = normalizeMapToken(String(roundstats.map ?? ""));
@@ -152,11 +177,24 @@ function normalizeMapToken(raw: string): string | null {
   return null;
 }
 
-function inferMode(reservation: Record<string, unknown> | undefined): string {
-  const gameType = Number(reservation?.game_type ?? 0);
-  // CS2 premier lobbies typically set the high premier bit in game_type.
-  if (gameType & 0x100000) return "premier";
-  if (gameType > 0) return "competitive";
+function inferMode(
+  reservation: Record<string, unknown> | undefined,
+  watchable: Record<string, unknown> | undefined
+): string {
+  const rankings = (reservation?.rankings as Record<string, unknown>[]) ?? [];
+  const rankTypeIds = rankings.map((r) => Number(r.rank_type_id ?? 0)).filter(Boolean);
+  const gameType = Number(reservation?.game_type ?? watchable?.game_type ?? 0);
+
+  if (
+    rankTypeIds.includes(PREMIER_RANK_TYPE_ID) ||
+    rankings.some((r) => typeof r.leaderboard_name === "string" && r.leaderboard_name) ||
+    gameType === PREMIER_GAME_TYPE ||
+    (gameType & 0x100000) !== 0
+  ) {
+    return "premier";
+  }
+
+  // CS2 GC often omits premier bits on older payloads; default to premier for MM sync.
   return "premier";
 }
 
@@ -173,6 +211,25 @@ function buildNameLookup(reservation: Record<string, unknown> | undefined): Map<
   return lookup;
 }
 
+export function buildGcParseDebug(match: Record<string, unknown>): GcParseDebug {
+  const allRoundStats = (match.roundstatsall as Record<string, unknown>[]) ?? [];
+  const roundstats = pickFinalRoundStats(match);
+  const reservation = asRecord(roundstats.reservation);
+  const watchable = asRecord(match.watchablematchinfo);
+  const rankings = (reservation?.rankings as Record<string, unknown>[]) ?? [];
+
+  return {
+    roundstats_count: allRoundStats.length,
+    picked_round: roundstats.round != null ? Number(roundstats.round) : null,
+    picked_team_scores: (roundstats.team_scores as number[]) ?? [],
+    game_type: reservation?.game_type != null ? Number(reservation.game_type) : null,
+    rank_type_ids: rankings.map((r) => Number(r.rank_type_id ?? 0)).filter(Boolean),
+    watchable_game_map: watchable?.game_map != null ? String(watchable.game_map) : null,
+    final_map_field: roundstats.map != null ? String(roundstats.map) : null,
+    final_map_id: roundstats.map_id != null ? Number(roundstats.map_id) : null,
+  };
+}
+
 export function normalizeGcMatch(
   match: Record<string, unknown>,
   shareCode: string | null,
@@ -184,6 +241,7 @@ export function normalizeGcMatch(
   const allRoundStats = (match.roundstatsall as Record<string, unknown>[]) ?? [];
   const roundstats = pickFinalRoundStats(match);
   const reservation = asRecord(roundstats.reservation);
+  const watchable = asRecord(match.watchablematchinfo);
   const accountIds = (reservation?.account_ids as number[]) ?? [];
   const nameLookup = buildNameLookup(reservation);
 
@@ -226,7 +284,7 @@ export function normalizeGcMatch(
     source: "steam_gc",
     source_match_id: matchId,
     map,
-    mode: inferMode(reservation),
+    mode: inferMode(reservation, watchable),
     played_at: playedAt,
     score_team_a: scoreA,
     score_team_b: scoreB,

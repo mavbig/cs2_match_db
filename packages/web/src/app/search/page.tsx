@@ -37,10 +37,8 @@ export default function SearchPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: "1.75rem", fontWeight: 700, marginBottom: "0.5rem" }}>Player Search</h1>
-      <p style={{ color: "var(--muted)", marginBottom: "1.5rem" }}>
-        Paste a Steam profile URL, Steam64 ID, or search by name
-      </p>
+      <h1 className="page-title">Player Search</h1>
+      <p className="page-subtitle">Paste a Steam profile URL, Steam64 ID, or search by name</p>
 
       <form onSubmit={handleSearch} style={{ display: "flex", gap: "0.75rem", marginBottom: "1.5rem" }}>
         <input

@@ -38,6 +38,26 @@ export interface Player {
   last_seen_at: string;
 }
 
+export interface MatchGcDebug {
+  match_id: string;
+  source_match_id: string;
+  share_code: string | null;
+  stored: {
+    map: string | null;
+    mode: string | null;
+    score_team_a: number | null;
+    score_team_b: number | null;
+    played_at: string | null;
+    duration_seconds: number | null;
+  };
+  parse_hints: Record<string, unknown> | null;
+  raw_payload: Record<string, unknown> | null;
+}
+
+export interface MatchCount {
+  total: number;
+}
+
 export interface MatchSummary {
   id: string;
   source: string;
@@ -128,7 +148,9 @@ export const api = {
   health: () => fetchApi<{ status: string }>("/api/v1/health"),
   dashboard: () => fetchApi<Dashboard>("/api/v1/dashboard"),
   matches: (limit = 20, offset = 0) => fetchApi<MatchSummary[]>(`/api/v1/matches?limit=${limit}&offset=${offset}`),
+  matchCount: () => fetchApi<MatchCount>("/api/v1/matches/count"),
   match: (id: string) => fetchApi<MatchDetail>(`/api/v1/matches/${id}`),
+  matchGcDebug: (id: string) => fetchApi<MatchGcDebug>(`/api/v1/matches/${id}/gc-debug`),
   searchPlayers: (q: string) => fetchApi<{ players: Player[] }>(`/api/v1/players?q=${encodeURIComponent(q)}`),
   player: (id: string) => fetchApi<PlayerDetail>(`/api/v1/players/${id}`),
   playerMatches: (id: string, limit = 100, offset = 0) =>

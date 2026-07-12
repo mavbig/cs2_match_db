@@ -154,6 +154,70 @@ async def list_matches(
     return [_match_summary(m) for m in result.scalars().all()]
 
 
+def _gc_parse_hints(raw: dict | None) -> dict | None:
+    if not raw:
+        return None
+
+    all_rs = raw.get("roundstatsall") or []
+    if all_rs:
+        def score_total(entry: dict) -> int:
+            scores = entry.get("team_scores") or []
+            return sum(scores[:2]) if len(scores) >= 2 else 0
+
+        meaningful = [e for e in all_rs if score_total(e) >= 8]
+        pool = meaningful or all_rs
+        last = sorted(pool, key=lambda e: e.get("round") or 0)[-1]
+    else:
+        last = raw.get("roundstats_legacy") or {}
+
+    reservation = last.get("reservation") or {}
+    watchable = raw.get("watchablematchinfo") or {}
+    rankings = reservation.get("rankings") or []
+
+    return {
+        "roundstats_count": len(all_rs),
+        "picked_round": last.get("round"),
+        "picked_team_scores": last.get("team_scores"),
+        "game_type": reservation.get("game_type"),
+        "rank_type_ids": [r.get("rank_type_id") for r in rankings if r.get("rank_type_id") is not None],
+        "watchable_game_map": watchable.get("game_map"),
+        "final_map_field": last.get("map"),
+        "final_map_id": last.get("map_id"),
+        "match_result": last.get("match_result"),
+    }
+
+
+@router.get("/matches/count")
+async def count_matches(db: AsyncSession = Depends(get_db)):
+    total = await db.scalar(select(func.count()).select_from(Match))
+    return {"total": total or 0}
+
+
+@router.get("/matches/{match_id}/gc-debug")
+async def match_gc_debug(match_id: UUID, db: AsyncSession = Depends(get_db)):
+    match = await get_match_with_players(db, match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+    if match.source != "steam_gc":
+        raise HTTPException(status_code=400, detail="Debug export only available for steam_gc matches")
+
+    return {
+        "match_id": str(match.id),
+        "source_match_id": match.source_match_id,
+        "share_code": match.share_code,
+        "stored": {
+            "map": match.map,
+            "mode": match.mode,
+            "score_team_a": match.score_team_a,
+            "score_team_b": match.score_team_b,
+            "played_at": match.played_at.isoformat() if match.played_at else None,
+            "duration_seconds": match.duration_seconds,
+        },
+        "parse_hints": _gc_parse_hints(match.raw_payload),
+        "raw_payload": match.raw_payload,
+    }
+
+
 @router.get("/matches/{match_id}", response_model=MatchOut)
 async def get_match(match_id: UUID, db: AsyncSession = Depends(get_db)):
     match = await get_match_with_players(db, match_id)

@@ -47,6 +47,15 @@ from app.services.steam_client import SteamClient
 router = APIRouter(prefix="/api/v1", tags=["api"])
 
 
+async def enqueue_player_enrichment(player_id: UUID) -> None:
+    try:
+        arq_redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+        await arq_redis.enqueue_job("enrich_player", str(player_id))
+        await arq_redis.aclose()
+    except Exception:
+        pass
+
+
 def verify_sync_token(x_sync_token: str = Header(...)) -> None:
     if x_sync_token != settings.api_sync_token:
         raise HTTPException(status_code=401, detail="Invalid sync token")
@@ -239,7 +248,7 @@ async def lookup_player(body: PlayerLookupIn, db: AsyncSession = Depends(get_db)
         profile_url=summary.get("profileurl"),
     )
 
-    await create_sync_job(db, f"enrich_player:{player.id}")
+    await enqueue_player_enrichment(player.id)
     detail = await get_player_detail(db, player.id)
     assert detail is not None
 

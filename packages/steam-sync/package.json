@@ -9,7 +9,7 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "globaloffensive": "^3.2.0",
+    "node-cs2": "^2.3.1",
     "steam-totp": "^2.1.2",
     "steam-user": "^5.2.0"
   },

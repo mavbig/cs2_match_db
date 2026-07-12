@@ -47,7 +47,6 @@ async function ensureGcConnected(): Promise<GcClient> {
   gcClient = new GcClient();
   try {
     await gcClient.login(username, BOT_PASSWORD, sharedSecret || undefined);
-    await gcClient.waitForGc();
     return gcClient;
   } catch (err) {
     gcClient = null;

@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import SteamUser from "steam-user";
 import SteamTotp from "steam-totp";
-import GlobalOffensive from "globaloffensive";
+import NodeCS2 from "node-cs2";
 import { EventEmitter } from "events";
 
 import {
@@ -17,6 +17,8 @@ import { normalizeGcMatch, parseShareCode } from "./match-parser.js";
 import type { NormalizedMatch } from "./match-parser.js";
 
 const SENTRY_DIR = process.env.STEAM_SENTRY_DIR ?? "/data/steam";
+const GC_CONNECT_TIMEOUT_MS = Number(process.env.GC_CONNECT_TIMEOUT_MS ?? 180_000);
+const GC_DEBUG = process.env.STEAM_SYNC_DEBUG === "1";
 
 function sentryPath(username: string): string {
   const safe = username.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -25,27 +27,28 @@ function sentryPath(username: string): string {
 
 export class GcClient extends EventEmitter {
   private user: InstanceType<typeof SteamUser>;
-  private csgo: InstanceType<typeof GlobalOffensive>;
+  private csgo: InstanceType<typeof NodeCS2>;
   private connected = false;
+  private gcSessionStarted = false;
   private pendingRequests = new Map<string, { resolve: (m: Record<string, unknown>[]) => void; reject: (e: Error) => void }>();
 
   constructor() {
     super();
-    // Prevent interactive stdin prompts in Docker.
     this.user = new SteamUser({ promptSteamGuardCode: false, autoRelogin: true });
-    this.csgo = new GlobalOffensive(this.user);
+    this.csgo = new NodeCS2(this.user);
 
     this.on("error", () => {
       /* default handler so login errors do not crash the process */
     });
 
-    this.user.on("loggedOn", () => {
-      console.log("[steam-sync] Logged on to Steam");
-      this.user.gamesPlayed([730]);
-    });
-
     this.user.on("error", (err: Error) => {
       console.error("[steam-sync] Steam client error:", err.message);
+    });
+
+    this.user.on("appLaunched", (appid: number) => {
+      if (appid !== 730) return;
+      console.log("[steam-sync] CS2 app launched — sending GC hello");
+      this.csgo.helloGC();
     });
 
     this.csgo.on("connectedToGC", () => {
@@ -58,6 +61,19 @@ export class GcClient extends EventEmitter {
       console.warn("[steam-sync] Disconnected from GC:", reason);
       this.connected = false;
     });
+
+    this.csgo.on("error", (err: Error & { code?: number; country?: string }) => {
+      const extra = [err.code != null ? `code=${err.code}` : null, err.country ? `country=${err.country}` : null]
+        .filter(Boolean)
+        .join(" ");
+      console.error(`[steam-sync] GC fatal error: ${err.message}${extra ? ` (${extra})` : ""}`);
+    });
+
+    if (GC_DEBUG) {
+      this.csgo.on("debug", (msg: string) => {
+        console.log("[steam-sync][gc-debug]", msg);
+      });
+    }
 
     this.csgo.on("matchList", (matches: Record<string, unknown>[], _data: unknown, requestId?: string) => {
       if (requestId && this.pendingRequests.has(requestId)) {
@@ -85,10 +101,12 @@ export class GcClient extends EventEmitter {
     if (refreshToken) {
       try {
         await this.logOn({ refreshToken }, accountName, "client refresh token");
+        await this.startGcSession();
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[steam-sync] Client refresh token login failed (${msg}), trying password + TOTP...`);
+        this.resetGcSession();
       }
     }
 
@@ -112,6 +130,22 @@ export class GcClient extends EventEmitter {
       accountName,
       "password + TOTP"
     );
+    await this.startGcSession();
+  }
+
+  private resetGcSession(): void {
+    this.connected = false;
+    this.gcSessionStarted = false;
+  }
+
+  private startGcSession(): Promise<void> {
+    if (this.connected) return Promise.resolve();
+    if (this.gcSessionStarted) return this.waitForGc();
+
+    this.gcSessionStarted = true;
+    console.log("[steam-sync] Starting CS2 session (app 730) for Game Coordinator...");
+    this.user.gamesPlayed([730], true);
+    return this.waitForGc();
   }
 
   private logOn(
@@ -136,6 +170,7 @@ export class GcClient extends EventEmitter {
       };
 
       const onLoggedOn = () => {
+        console.log("[steam-sync] Logged on to Steam");
         cleanup();
         resolve();
       };
@@ -174,14 +209,37 @@ export class GcClient extends EventEmitter {
     });
   }
 
-  waitForGc(timeoutMs = 60000): Promise<void> {
+  waitForGc(timeoutMs = GC_CONNECT_TIMEOUT_MS): Promise<void> {
     if (this.connected) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("GC connection timeout")), timeoutMs);
-      this.once("ready", () => {
-        clearTimeout(timer);
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(
+          new Error(
+            `GC connection timeout after ${Math.round(timeoutMs / 1000)}s — ` +
+              "ensure the bot account owns CS2 and is not stuck in another session"
+          )
+        );
+      }, timeoutMs);
+
+      const onReady = () => {
+        cleanup();
         resolve();
-      });
+      };
+
+      const onGcError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off("ready", onReady);
+        this.csgo.off("error", onGcError);
+      };
+
+      this.once("ready", onReady);
+      this.csgo.once("error", onGcError);
     });
   }
 

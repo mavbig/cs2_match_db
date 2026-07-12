@@ -144,6 +144,32 @@ docker compose logs steam-sync --tail 30
 
 You should see `[steam-sync] Starting CS2 match sync service` followed by sync activity or a clear configuration message.
 
+### `GC connection timeout` after `Logged on to Steam`
+
+Steam login succeeded but the CS2 Game Coordinator did not respond in time. Check logs for:
+
+```
+[steam-sync] CS2 app launched — sending GC hello
+[steam-sync] Connected to CS2 Game Coordinator
+```
+
+If you only see `Logged on to Steam` then timeout:
+
+1. **Bot must have CS2 in its library** — add [Counter-Strike 2 (free)](https://store.steampowered.com/app/730) on the bot account
+2. **Kick other sessions** — if the bot is logged in elsewhere playing CS2, the sync uses `gamesPlayed` with force; still worth logging the bot out of other clients
+3. **Rebuild steam-sync** after pulling (uses `node-cs2` with up-to-date GC protocol):
+   ```bash
+   docker compose up -d --build --no-cache steam-sync
+   docker compose logs -f steam-sync
+   ```
+4. **Enable GC debug** (verbose) in `.env`:
+   ```
+   STEAM_SYNC_DEBUG=1
+   GC_CONNECT_TIMEOUT_MS=180000
+   ```
+
+If you see `GC fatal error: Logon Fatal Error` the message usually explains why (e.g. no CS2 license, VAC, region).
+
 ### steam-sync runs but imports 0 matches
 
 Check that all of these are set (Settings UI **and/or** `.env`):
@@ -282,6 +308,8 @@ Create the bot account **without** Mobile Authenticator only if Steam allows it 
 | `FACEIT_NICKNAME` | No | Your FACEIT nickname |
 | `LEETIFY_API_KEY` | No | Leetify Public API key |
 | `SYNC_POLL_INTERVAL` | No | Seconds between GC polls (default 300) |
+| `GC_CONNECT_TIMEOUT_MS` | No | Max wait for GC connect after Steam login (default 180000) |
+| `STEAM_SYNC_DEBUG` | No | Set to `1` to log GC debug messages |
 
 ## Usage
 

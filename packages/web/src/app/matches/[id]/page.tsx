@@ -14,6 +14,8 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
   const teamA = match.players.filter((p) => p.team === "team_a");
   const teamB = match.players.filter((p) => p.team === "team_b");
   const allPlayers = teamA.length ? [...teamA, ...teamB] : match.players;
+  const isFaceit = match.source === "faceit";
+  const showPing = !isFaceit || allPlayers.some((p) => p.ping != null);
 
   return (
     <div>
@@ -36,11 +38,16 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
 
       <div className="card">
         <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Scoreboard</h2>
+        {isFaceit && !showPing && (
+          <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>
+            FACEIT&apos;s open API does not include per-player ping. Score is estimated from K/A/MVP when not provided.
+          </p>
+        )}
         <table>
           <thead>
             <tr>
               <th>Player</th>
-              <th>Ping</th>
+              {showPing && <th>Ping</th>}
               <th>K</th>
               <th>A</th>
               <th>D</th>
@@ -62,7 +69,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
                     )}
                   </Link>
                 </td>
-                <td>{p.ping ?? "—"}</td>
+                {showPing && <td>{p.ping ?? "—"}</td>}
                 <td>{p.kills ?? "—"}</td>
                 <td>{p.assists ?? "—"}</td>
                 <td>{p.deaths ?? "—"}</td>

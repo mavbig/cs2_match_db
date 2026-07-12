@@ -37,6 +37,51 @@ def _parse_stat_int(value) -> int | None:
     return int(m.group()) if m else None
 
 
+def _get_player_stat(player_stats: dict, *keys: str):
+    if not player_stats:
+        return None
+    lowered = {str(k).lower(): v for k, v in player_stats.items()}
+    for key in keys:
+        val = lowered.get(key.lower())
+        if val is not None and str(val).strip() != "":
+            return val
+    return None
+
+
+def _parse_faceit_ping(player_stats: dict) -> int | None:
+    raw = _get_player_stat(
+        player_stats,
+        "Ping",
+        "Average Ping",
+        "Avg Ping",
+        "Avg. Ping",
+        "Average ping",
+    )
+    return _parse_stat_int(raw)
+
+
+def _parse_faceit_tab_score(
+    player_stats: dict,
+    kills: int | None,
+    assists: int | None,
+    mvps: int | None,
+) -> int | None:
+    raw = _get_player_stat(player_stats, "Score", "Points", "Tab Score", "Match Score")
+    if raw is not None:
+        text = str(raw).strip()
+        # FACEIT sometimes uses "Score" for team round score (e.g. "13 / 11") — skip that.
+        if "/" not in text:
+            parsed = _parse_stat_int(text)
+            if parsed is not None:
+                return parsed
+
+    if kills is None and assists is None and mvps is None:
+        return None
+
+    # Approximate Valve tab score when FACEIT does not expose per-player points.
+    return (kills or 0) * 2 + (assists or 0) + (mvps or 0)
+
+
 def _parse_headshot_pct(value) -> float | None:
     if value is None:
         return None
@@ -357,26 +402,35 @@ async def _import_faceit_match(
 
             player_db_id = await _upsert_player(session, steam64, nickname, now)
             ps = fp.get("player_stats") or {}
+            kills = _parse_stat_int(_get_player_stat(ps, "Kills"))
+            deaths = _parse_stat_int(_get_player_stat(ps, "Deaths"))
+            assists = _parse_stat_int(_get_player_stat(ps, "Assists"))
+            mvps = _parse_stat_int(_get_player_stat(ps, "MVPs", "MVP"))
+            ping = _parse_faceit_ping(ps)
+            tab_score = _parse_faceit_tab_score(ps, kills, assists, mvps)
 
             await session.execute(
                 text(
-                    "INSERT INTO match_players (id, match_id, player_id, team, kills, deaths, assists, mvps, headshot_pct, score, is_me) "
-                    "VALUES (gen_random_uuid(), :mid, :pid, :team, :k, :d, :a, :mvp, :hsp, :score, :is_me) "
+                    "INSERT INTO match_players (id, match_id, player_id, team, kills, deaths, assists, mvps, headshot_pct, score, ping, is_me) "
+                    "VALUES (gen_random_uuid(), :mid, :pid, :team, :k, :d, :a, :mvp, :hsp, :score, :ping, :is_me) "
                     "ON CONFLICT (match_id, player_id) DO UPDATE SET "
                     "team = EXCLUDED.team, kills = EXCLUDED.kills, deaths = EXCLUDED.deaths, "
                     "assists = EXCLUDED.assists, mvps = EXCLUDED.mvps, headshot_pct = EXCLUDED.headshot_pct, "
-                    "score = EXCLUDED.score, is_me = EXCLUDED.is_me"
+                    "score = EXCLUDED.score, ping = EXCLUDED.ping, is_me = EXCLUDED.is_me"
                 ),
                 {
                     "mid": db_match_id,
                     "pid": player_db_id,
                     "team": team_key,
-                    "k": _parse_stat_int(ps.get("Kills")),
-                    "d": _parse_stat_int(ps.get("Deaths")),
-                    "a": _parse_stat_int(ps.get("Assists")),
-                    "mvp": _parse_stat_int(ps.get("MVPs")),
-                    "hsp": _parse_headshot_pct(ps.get("Headshots %") or ps.get("Headshots")),
-                    "score": _parse_stat_int(ps.get("K/R Ratio") or ps.get("Score")),
+                    "k": kills,
+                    "d": deaths,
+                    "a": assists,
+                    "mvp": mvps,
+                    "hsp": _parse_headshot_pct(
+                        _get_player_stat(ps, "Headshots %", "Headshots", "HS %", "Headshot %")
+                    ),
+                    "score": tab_score,
+                    "ping": ping,
                     "is_me": bool(my_steam64 and steam64 == my_steam64),
                 },
             )

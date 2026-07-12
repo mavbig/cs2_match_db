@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MatchActions } from "@/components/MatchActions";
 import { MatchDebugPanel } from "@/components/MatchDebugPanel";
+import { MatchScoreboard } from "@/components/MatchScoreboard";
 import { api, formatDate, formatMap, formatMatchScore } from "@/lib/api";
 
 export default async function MatchDetailPage({
@@ -31,11 +32,7 @@ export default async function MatchDetailPage({
     }
   }
 
-  const teamA = match.players.filter((p) => p.team === "team_a");
-  const teamB = match.players.filter((p) => p.team === "team_b");
-  const allPlayers = teamA.length ? [...teamA, ...teamB] : match.players;
   const isFaceit = match.source === "faceit";
-  const showPing = !isFaceit || allPlayers.some((p) => p.ping != null);
 
   return (
     <div>
@@ -69,51 +66,13 @@ export default async function MatchDetailPage({
         <MatchActions matchId={id} demoUrl={match.demo_url} />
       </div>
 
-      <div className="card">
-        <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Scoreboard</h2>
-        {isFaceit && !showPing && (
-          <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>
-            FACEIT&apos;s open API does not include per-player ping. Score is estimated from K/A/MVP when not provided.
-          </p>
-        )}
-        <table>
-          <thead>
-            <tr>
-              <th>Player</th>
-              {showPing && <th>Ping</th>}
-              <th>K</th>
-              <th>A</th>
-              <th>D</th>
-              <th>★</th>
-              <th>HSP</th>
-              <th>Score</th>
-            </tr>
-          </thead>
-          <tbody>
-            {allPlayers.map((p) => (
-              <tr key={p.player_id} style={p.is_me ? { background: "rgba(59, 158, 255, 0.08)" } : {}}>
-                <td>
-                  <Link href={`/players/${p.player_id}`}>
-                    {p.name ?? p.steam64_id}
-                    {p.is_me && (
-                      <span className="badge badge-blue" style={{ marginLeft: "0.5rem" }}>
-                        you
-                      </span>
-                    )}
-                  </Link>
-                </td>
-                {showPing && <td>{p.ping ?? "—"}</td>}
-                <td>{p.kills ?? "—"}</td>
-                <td>{p.assists ?? "—"}</td>
-                <td>{p.deaths ?? "—"}</td>
-                <td>{p.mvps ? `★${p.mvps}` : "—"}</td>
-                <td>{p.headshot_pct != null ? `${Math.round(p.headshot_pct)}%` : "—"}</td>
-                <td>{p.score ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <MatchScoreboard
+        players={match.players}
+        scoreTeamA={match.score_team_a}
+        scoreTeamB={match.score_team_b}
+        source={match.source}
+        isFaceit={isFaceit}
+      />
 
       {gcDebug && <MatchDebugPanel debug={gcDebug} />}
     </div>

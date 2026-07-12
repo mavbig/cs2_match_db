@@ -126,6 +126,94 @@ a:hover {
   font-size: 0.85rem;
 }
 
+.scoreboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .scoreboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.team-panel {
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.team-panel.team-a {
+  background: rgba(59, 158, 255, 0.04);
+  border-color: rgba(59, 158, 255, 0.22);
+}
+
+.team-panel.team-b {
+  background: rgba(255, 140, 66, 0.04);
+  border-color: rgba(255, 140, 66, 0.22);
+}
+
+.team-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 1rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.team-header.team-a {
+  background: rgba(59, 158, 255, 0.12);
+  color: #9fd0ff;
+}
+
+.team-header.team-b {
+  background: rgba(255, 140, 66, 0.12);
+  color: #ffc299;
+}
+
+.team-score {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.scoreboard-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.scoreboard-table th,
+.scoreboard-table td {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.88rem;
+}
+
+.scoreboard-table tbody tr.is-me td {
+  background: rgba(59, 158, 255, 0.1);
+}
+
+.scoreboard-table-team-a tbody tr:hover td {
+  background: rgba(59, 158, 255, 0.06);
+}
+
+.scoreboard-table-team-b tbody tr:hover td {
+  background: rgba(255, 140, 66, 0.06);
+}
+
+.scoreboard-table .score-cell {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.scoreboard-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
 @media (max-width: 640px) {
   .site-header-inner {
     flex-direction: column;

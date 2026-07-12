@@ -363,7 +363,7 @@ class LeetifyClient:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 "https://api-public.cs-prod.leetify.com/v3/profile",
-                params={"steamId": steam64_id},
+                params={"steam64_id": steam64_id},
                 headers=headers,
             )
             if resp.status_code in (404, 401):

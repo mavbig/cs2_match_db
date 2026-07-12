@@ -61,3 +61,46 @@ class FaceitClient:
             resp = await client.get(f"{self.BASE}/matches/{match_id}/stats", headers=self._headers())
             resp.raise_for_status()
             return resp.json()
+
+    async def get_player_stats(self, player_id: str, game: str = "cs2") -> dict | None:
+        if not self.api_key:
+            return None
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self.BASE}/players/{player_id}/stats/{game}",
+                headers=self._headers(),
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_player_recent_match_stats(
+        self, player_id: str, game: str = "cs2", limit: int = 20
+    ) -> dict | None:
+        if not self.api_key:
+            return None
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self.BASE}/players/{player_id}/games/{game}/stats",
+                params={"limit": limit},
+                headers=self._headers(),
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_player_bans(self, player_id: str, limit: int = 20) -> dict | None:
+        if not self.api_key:
+            return None
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self.BASE}/players/{player_id}/bans",
+                params={"limit": limit},
+                headers=self._headers(),
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()

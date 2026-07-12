@@ -91,6 +91,184 @@ def _parse_headshot_pct(value) -> float | None:
     return float(m.group(1)) if m else None
 
 
+def _parse_stat_float(value) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    m = re.search(r"([\d.]+)", str(value).replace(",", "."))
+    return float(m.group(1)) if m else None
+
+
+def _normalize_faceit_lifetime(lifetime: dict) -> dict:
+    return {
+        "matches": _parse_stat_int(_get_player_stat(lifetime, "Total Matches", "Matches")),
+        "win_rate_pct": _parse_stat_float(_get_player_stat(lifetime, "Win Rate %", "Win Rate")),
+        "kd": _parse_stat_float(_get_player_stat(lifetime, "Average K/D Ratio", "K/D Ratio")),
+        "kr": _parse_stat_float(_get_player_stat(lifetime, "Average K/R Ratio", "K/R Ratio")),
+        "adr": _parse_stat_float(_get_player_stat(lifetime, "ADR", "Average Damage per Round")),
+        "hs_pct": _parse_stat_float(
+            _get_player_stat(lifetime, "Average Headshots %", "Headshots %", "Headshot %")
+        ),
+        "avg_kills": _parse_stat_float(_get_player_stat(lifetime, "Average Kills", "Kills")),
+        "avg_deaths": _parse_stat_float(_get_player_stat(lifetime, "Average Deaths", "Deaths")),
+        "avg_assists": _parse_stat_float(_get_player_stat(lifetime, "Average Assists", "Assists")),
+        "entry_success_pct": _parse_stat_float(
+            _get_player_stat(lifetime, "Entry Success Rate", "Entry Rate")
+        ),
+        "kast_pct": _parse_stat_float(_get_player_stat(lifetime, "KAST", "Average KAST")),
+    }
+
+
+def _aggregate_faceit_recent(items: list, limit: int = 20) -> dict:
+    samples = [(item.get("stats") or {}) for item in items[:limit] if item.get("stats")]
+    if not samples:
+        return {"match_count": 0}
+
+    def _avg(*keys: str) -> float | None:
+        vals = []
+        for sample in samples:
+            parsed = _parse_stat_float(_get_player_stat(sample, *keys))
+            if parsed is not None:
+                vals.append(parsed)
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    return {
+        "match_count": len(samples),
+        "kd": _avg("K/D Ratio"),
+        "kr": _avg("K/R Ratio"),
+        "adr": _avg("ADR", "Average Damage per Round"),
+        "hs_pct": _avg("Headshots %", "Average Headshots %", "Headshot %"),
+        "avg_kills": _avg("Kills", "Average Kills"),
+        "avg_deaths": _avg("Deaths", "Average Deaths"),
+        "avg_assists": _avg("Assists", "Average Assists"),
+        "entry_success_pct": _avg("Entry Success Rate", "Entry Rate"),
+        "kast_pct": _avg("KAST"),
+    }
+
+
+def _compute_faceit_flags(lifetime: dict, recent: dict, bans: list) -> list[dict]:
+    flags: list[dict] = []
+
+    if bans:
+        latest = bans[0]
+        reason = latest.get("reason") or "unknown reason"
+        flags.append(
+            {
+                "severity": "high",
+                "label": "FACEIT ban on record",
+                "detail": f"{len(bans)} ban(s) — latest: {reason}",
+            }
+        )
+
+    matches = lifetime.get("matches")
+    kd = lifetime.get("kd")
+    hs = lifetime.get("hs_pct")
+
+    if matches is not None and matches < 50 and kd is not None and kd >= 1.35:
+        flags.append(
+            {
+                "severity": "medium",
+                "label": "Low match count, high lifetime K/D",
+                "detail": f"{matches} matches with {kd:.2f} K/D",
+            }
+        )
+
+    if matches is not None and matches < 100 and hs is not None and hs >= 55:
+        flags.append(
+            {
+                "severity": "medium",
+                "label": "High headshot % on low match count",
+                "detail": f"{hs:.1f}% HS over {matches} matches",
+            }
+        )
+
+    recent_adr = recent.get("adr")
+    lifetime_adr = lifetime.get("adr")
+    if (
+        recent_adr is not None
+        and lifetime_adr is not None
+        and lifetime_adr > 0
+        and recent_adr >= lifetime_adr * 1.25
+    ):
+        flags.append(
+            {
+                "severity": "medium",
+                "label": "Recent ADR above lifetime average",
+                "detail": f"Last {recent.get('match_count', '?')} avg {recent_adr} vs lifetime {lifetime_adr}",
+            }
+        )
+
+    recent_kd = recent.get("kd")
+    if (
+        recent_kd is not None
+        and kd is not None
+        and kd > 0
+        and recent_kd >= kd * 1.25
+        and recent_kd >= 1.3
+    ):
+        flags.append(
+            {
+                "severity": "medium",
+                "label": "Recent K/D spike vs lifetime",
+                "detail": f"Last {recent.get('match_count', '?')} avg {recent_kd:.2f} vs lifetime {kd:.2f}",
+            }
+        )
+
+    return flags
+
+
+async def _fetch_faceit_enrichment(
+    client: httpx.AsyncClient,
+    headers: dict,
+    faceit_player_id: str,
+) -> dict:
+    lifetime_raw: dict = {}
+    recent_items: list = []
+    bans: list = []
+
+    stats_resp = await client.get(
+        f"{FACEIT_BASE}/players/{faceit_player_id}/stats/cs2",
+        headers=headers,
+    )
+    if stats_resp.status_code == 200:
+        lifetime_raw = stats_resp.json().get("lifetime") or {}
+
+    recent_resp = await client.get(
+        f"{FACEIT_BASE}/players/{faceit_player_id}/games/cs2/stats",
+        params={"limit": 20},
+        headers=headers,
+    )
+    if recent_resp.status_code == 200:
+        recent_items = recent_resp.json().get("items") or []
+
+    bans_resp = await client.get(
+        f"{FACEIT_BASE}/players/{faceit_player_id}/bans",
+        params={"limit": 20},
+        headers=headers,
+    )
+    if bans_resp.status_code == 200:
+        bans = bans_resp.json().get("items") or []
+
+    lifetime = _normalize_faceit_lifetime(lifetime_raw)
+    recent = _aggregate_faceit_recent(recent_items)
+    return {
+        "lifetime": lifetime,
+        "recent_20": recent,
+        "bans": [
+            {
+                "type": b.get("type"),
+                "reason": b.get("reason"),
+                "game": b.get("game"),
+                "starts_at": b.get("starts_at"),
+                "ends_at": b.get("ends_at"),
+            }
+            for b in bans
+        ],
+        "flags": _compute_faceit_flags(lifetime, recent, bans),
+    }
+
+
 def _extract_map(detail: dict, stats: dict) -> str | None:
     voting = detail.get("voting") or {}
     map_info = voting.get("map") or {}
@@ -259,19 +437,24 @@ async def enrich_player(ctx, player_id: str):
 
         if faceit_key:
             async with httpx.AsyncClient(timeout=30) as client:
+                headers = {"Authorization": f"Bearer {faceit_key}"}
                 resp = await client.get(
                     f"{FACEIT_BASE}/players",
                     params={"game": "cs2", "game_player_id": steam64_id},
-                    headers={"Authorization": f"Bearer {faceit_key}"},
+                    headers=headers,
                 )
                 if resp.status_code == 200:
                     data = resp.json()
                     cs2 = data.get("games", {}).get("cs2", {})
+                    faceit_id = data.get("player_id", "")
+                    nickname = data.get("nickname")
+                    profile_url = f"https://www.faceit.com/en/players/{nickname}" if nickname else None
+
                     existing = await session.execute(
                         text(
                             "SELECT id FROM player_platform_accounts WHERE platform = 'faceit' AND external_id = :eid"
                         ),
-                        {"eid": data.get("player_id", "")},
+                        {"eid": faceit_id},
                     )
                     if not existing.fetchone():
                         await session.execute(
@@ -279,29 +462,34 @@ async def enrich_player(ctx, player_id: str):
                                 "INSERT INTO player_platform_accounts (id, player_id, platform, external_id, nickname, profile_url) "
                                 "VALUES (gen_random_uuid(), :pid, 'faceit', :eid, :nick, :url)"
                             ),
-                            {
-                                "pid": pid,
-                                "eid": data.get("player_id", ""),
-                                "nick": data.get("nickname"),
-                                "url": f"https://www.faceit.com/en/players/{data.get('nickname')}",
-                            },
+                            {"pid": pid, "eid": faceit_id, "nick": nickname, "url": profile_url},
                         )
+                    else:
+                        await session.execute(
+                            text(
+                                "UPDATE player_platform_accounts SET nickname = :nick, profile_url = :url "
+                                "WHERE platform = 'faceit' AND external_id = :eid"
+                            ),
+                            {"eid": faceit_id, "nick": nickname, "url": profile_url},
+                        )
+
+                    enrichment = await _fetch_faceit_enrichment(client, headers, faceit_id)
+                    payload = {
+                        "player_id": faceit_id,
+                        "nickname": nickname,
+                        "profile_url": profile_url,
+                        "verified": data.get("verified"),
+                        "country": data.get("country"),
+                        "elo": cs2.get("faceit_elo"),
+                        "skill_level": cs2.get("skill_level"),
+                        **enrichment,
+                    }
                     await session.execute(
                         text(
                             "INSERT INTO player_stat_snapshots (id, player_id, source, captured_at, payload) "
                             "VALUES (gen_random_uuid(), :pid, 'faceit', :now, CAST(:payload AS jsonb))"
                         ),
-                        {
-                            "pid": pid,
-                            "now": now,
-                            "payload": json.dumps(
-                                {
-                                    "elo": cs2.get("faceit_elo"),
-                                    "skill_level": cs2.get("skill_level"),
-                                    "nickname": data.get("nickname"),
-                                }
-                            ),
-                        },
+                        {"pid": pid, "now": now, "payload": json.dumps(payload)},
                     )
 
         await session.commit()

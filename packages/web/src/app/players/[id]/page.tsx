@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { api, formatDate, formatMap } from "@/lib/api";
+import { FaceitProfile, FaceitProfileStats } from "@/components/FaceitProfile";
+import { api, formatDate } from "@/lib/api";
 
 export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -13,7 +14,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
   const leetify = player.latest_stats.leetify as Record<string, unknown> | undefined;
   const rating = leetify?.rating as Record<string, number> | undefined;
-  const faceit = player.latest_stats.faceit as Record<string, unknown> | undefined;
+  const faceit = player.latest_stats.faceit as FaceitProfileStats | undefined;
 
   return (
     <div>
@@ -46,13 +47,21 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
           <div className="value">{player.match_count}</div>
           <div className="label">Matches in DB</div>
         </div>
-        {faceit && (
+        {faceit?.elo != null && (
           <div className="stat-box">
-            <div className="value">{String(faceit.elo ?? "—")}</div>
+            <div className="value">{faceit.elo}</div>
             <div className="label">FACEIT ELO</div>
           </div>
         )}
+        {faceit?.lifetime?.kd != null && (
+          <div className="stat-box">
+            <div className="value">{faceit.lifetime.kd.toFixed(2)}</div>
+            <div className="label">FACEIT K/D</div>
+          </div>
+        )}
       </div>
+
+      {faceit && <FaceitProfile faceit={faceit} />}
 
       {rating && (
         <div className="card" style={{ marginBottom: "1.5rem" }}>

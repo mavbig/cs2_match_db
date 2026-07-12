@@ -76,6 +76,7 @@ def _restore_teams_from_gc(match: Match) -> None:
 
 def reparse_gc_payload(raw: dict) -> dict:
     last = _pick_final_round_stats(raw)
+    team_scores = last.get("team_scores") or []
     map_name = None
     watchable = raw.get("watchablematchinfo") or {}
     for candidate in (watchable.get("game_map"), watchable.get("game_mapgroup")):

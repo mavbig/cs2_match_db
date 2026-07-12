@@ -36,21 +36,46 @@ def extract_demo_url_from_gc(raw: dict | None) -> str | None:
     return None
 
 
-def reparse_gc_payload(raw: dict) -> dict:
+def _pick_final_round_stats(raw: dict) -> dict:
     all_rs = raw.get("roundstatsall") or []
     if all_rs:
         with_result = [e for e in all_rs if e.get("match_result") not in (None, 0)]
         if with_result:
-            last = with_result[-1]
-        else:
-            last = max(
-                all_rs,
-                key=lambda e: sum((e.get("team_scores") or [])[:2]) if e.get("team_scores") else 0,
-            )
-    else:
-        last = raw.get("roundstats_legacy") or {}
+            return with_result[-1]
+        return max(
+            all_rs,
+            key=lambda e: sum((e.get("team_scores") or [])[:2]) if e.get("team_scores") else 0,
+        )
+    return raw.get("roundstats_legacy") or {}
 
-    team_scores = last.get("team_scores") or []
+
+def _account_id_to_steam64(account_id: int) -> str:
+    return str(int(account_id) + 76561197960265728)
+
+
+def _restore_teams_from_gc(match: Match) -> None:
+    if match.source != "steam_gc" or not match.raw_payload:
+        return
+    last = _pick_final_round_stats(match.raw_payload)
+    reservation = last.get("reservation") or {}
+    account_ids = reservation.get("account_ids") or []
+    if len(account_ids) < 2:
+        return
+
+    steam_to_team: dict[str, str] = {}
+    halfway = len(account_ids) / 2
+    for i, account_id in enumerate(account_ids):
+        steam64 = _account_id_to_steam64(account_id)
+        steam_to_team[steam64] = "team_a" if i < halfway else "team_b"
+
+    for mp in match.players:
+        team = steam_to_team.get(mp.player.steam64_id)
+        if team:
+            mp.team = team
+
+
+def reparse_gc_payload(raw: dict) -> dict:
+    last = _pick_final_round_stats(raw)
     map_name = None
     watchable = raw.get("watchablematchinfo") or {}
     for candidate in (watchable.get("game_map"), watchable.get("game_mapgroup")):
@@ -88,12 +113,28 @@ def _leetify_game_id_from_match(match: Match) -> str | None:
     return None
 
 
-def _team_number_map(stats: list[dict]) -> dict[int, str]:
+def _team_number_map(stats: list[dict], my_steam64: str | None) -> dict[int, str]:
     team_numbers = sorted(
         {int(s["initial_team_number"]) for s in stats if s.get("initial_team_number") is not None}
     )
     if len(team_numbers) < 2:
         return {}
+
+    my_team_number = None
+    if my_steam64:
+        for stat in stats:
+            steam64 = str(stat.get("steam64_id") or stat.get("steamId") or stat.get("steam_id") or "")
+            if steam64 == my_steam64:
+                tn = stat.get("initial_team_number")
+                if tn is not None:
+                    my_team_number = int(tn)
+                break
+
+    if my_team_number is not None and my_team_number in team_numbers:
+        others = [n for n in team_numbers if n != my_team_number]
+        if others:
+            return {my_team_number: "team_a", others[0]: "team_b"}
+
     return {team_numbers[0]: "team_a", team_numbers[1]: "team_b"}
 
 
@@ -166,7 +207,9 @@ async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict
     if not stats:
         return
 
-    team_map = _team_number_map(stats)
+    _restore_teams_from_gc(match)
+
+    team_map = _team_number_map(stats, my_steam64)
     steam_ids = [
         str(s.get("steam64_id") or s.get("steamId") or s.get("steam_id"))
         for s in stats
@@ -189,11 +232,11 @@ async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict
 
         team_number = stat.get("initial_team_number")
         team = team_map.get(int(team_number)) if team_number is not None else None
-        if team is None:
-            team = "team_a" if idx < len(stats) / 2 else "team_b"
 
         mp = mp_by_steam.get(steam64)
         if mp is None:
+            if team is None:
+                team = "team_a" if idx < len(stats) / 2 else "team_b"
             mp = MatchPlayer(
                 match_id=match.id,
                 player_id=player.id,
@@ -202,7 +245,7 @@ async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict
             )
             db.add(mp)
             mp_by_steam[steam64] = mp
-        else:
+        elif team and not mp.team:
             mp.team = team
 
         mp.kills = _int_or_none(stat.get("total_kills") or stat.get("kills"))

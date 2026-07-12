@@ -1,6 +1,7 @@
 import { ackForceFullSync, completeJob, fetchSyncConfig, postMatches, startJob } from "./api-poster.js";
 import { GcClient } from "./gc-client.js";
 import { getAccountName, getClientRefreshToken, getSharedSecret, getRefreshToken, isClientRefreshToken, isThrottleError, loadMaFile, throttleBackoffMs } from "./mafile.js";
+import { getNextMatchSharingCode, ShareCodeChainEnd } from "./steam-api.js";
 
 const POLL_INTERVAL = Number(process.env.SYNC_POLL_INTERVAL ?? 300) * 1000;
 const TRIGGER_CHECK_INTERVAL = Number(process.env.SYNC_TRIGGER_CHECK_INTERVAL ?? 15) * 1000;
@@ -68,6 +69,10 @@ async function runFullSync(): Promise<number> {
     console.log("[steam-sync] Steam sync not configured yet, skipping");
     return 0;
   }
+  if (!config.steam_api_key) {
+    console.log("[steam-sync] Steam Web API key not configured, skipping full sync");
+    return 0;
+  }
 
   const jobId = await startJob("steam_gc");
   let imported = 0;
@@ -78,6 +83,7 @@ async function runFullSync(): Promise<number> {
       config.steam_oldest_share_code,
       config.steam_auth_code,
       config.my_steam64_id,
+      config.steam_api_key,
       200
     );
 
@@ -104,7 +110,7 @@ async function runFullSync(): Promise<number> {
 
 async function runIncrementalSync(): Promise<number> {
   const config = await fetchSyncConfig();
-  if (!config?.steam_auth_code || !config?.my_steam64_id) return 0;
+  if (!config?.steam_auth_code || !config?.my_steam64_id || !config.steam_api_key) return 0;
 
   const jobId = await startJob("steam_gc");
   let imported = 0;
@@ -112,10 +118,28 @@ async function runIncrementalSync(): Promise<number> {
   try {
     const client = await ensureGcConnected();
 
-    const shareCode = lastSyncedShareCode ?? config.steam_oldest_share_code;
-    if (!shareCode) return 0;
+    const knownCode = lastSyncedShareCode ?? config.steam_oldest_share_code;
+    if (!knownCode) return 0;
 
-    const match = await client.fetchMatchByShareCode(shareCode, config.my_steam64_id);
+    let nextCode: string;
+    try {
+      nextCode = await getNextMatchSharingCode(
+        config.steam_api_key,
+        config.my_steam64_id,
+        config.steam_auth_code,
+        knownCode
+      );
+    } catch (err) {
+      if (err instanceof ShareCodeChainEnd) {
+        console.log(`[steam-sync] No new matches since ${knownCode}`);
+        if (jobId) await completeJob(jobId, 0);
+        return 0;
+      }
+      throw err;
+    }
+
+    console.log(`[steam-sync] New match share code: ${nextCode}`);
+    const match = await client.fetchMatchByShareCode(nextCode, config.my_steam64_id);
     if (match) {
       const result = await postMatches([match]);
       imported = result.created + result.updated;

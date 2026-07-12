@@ -15,10 +15,19 @@ import {
 } from "./mafile.js";
 import { normalizeGcMatch, parseShareCode } from "./match-parser.js";
 import type { NormalizedMatch } from "./match-parser.js";
+import { getNextMatchSharingCode, ShareCodeChainEnd } from "./steam-api.js";
 
 const SENTRY_DIR = process.env.STEAM_SENTRY_DIR ?? "/data/steam";
 const GC_CONNECT_TIMEOUT_MS = Number(process.env.GC_CONNECT_TIMEOUT_MS ?? 180_000);
+const MATCH_REQUEST_TIMEOUT_MS = Number(process.env.MATCH_REQUEST_TIMEOUT_MS ?? 45_000);
 const GC_DEBUG = process.env.STEAM_SYNC_DEBUG === "1";
+
+interface PendingMatchRequest {
+  shareCode: string;
+  resolve: (matches: Record<string, unknown>[]) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
 
 function sentryPath(username: string): string {
   const safe = username.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -30,7 +39,7 @@ export class GcClient extends EventEmitter {
   private csgo: InstanceType<typeof NodeCS2>;
   private connected = false;
   private gcSessionStarted = false;
-  private pendingRequests = new Map<string, { resolve: (m: Record<string, unknown>[]) => void; reject: (e: Error) => void }>();
+  private pendingMatchRequest: PendingMatchRequest | null = null;
 
   constructor() {
     super();
@@ -75,12 +84,25 @@ export class GcClient extends EventEmitter {
       });
     }
 
-    this.csgo.on("matchList", (matches: Record<string, unknown>[], _data: unknown, requestId?: string) => {
-      if (requestId && this.pendingRequests.has(requestId)) {
-        const { resolve } = this.pendingRequests.get(requestId)!;
-        this.pendingRequests.delete(requestId);
-        resolve(matches ?? []);
+    this.csgo.on("matchList", (matches: Record<string, unknown>[], proto?: { msgrequestid?: number }) => {
+      const count = matches?.length ?? 0;
+      const msgRequestId = proto?.msgrequestid;
+      if (GC_DEBUG || this.pendingMatchRequest) {
+        console.log(
+          `[steam-sync] matchList: ${count} match(es)` +
+            (msgRequestId != null ? `, msgrequestid=${msgRequestId}` : "")
+        );
       }
+
+      const pending = this.pendingMatchRequest;
+      if (pending) {
+        this.pendingMatchRequest = null;
+        clearTimeout(pending.timer);
+        pending.resolve(matches ?? []);
+      } else if (count > 0) {
+        console.log("[steam-sync] Unsolicited matchList ignored");
+      }
+
       this.emit("matchList", matches);
     });
   }
@@ -244,29 +266,43 @@ export class GcClient extends EventEmitter {
   }
 
   requestGame(shareCode: string): Promise<Record<string, unknown>[]> {
-    return new Promise((resolve, reject) => {
-      const requestId = `req_${Date.now()}`;
-      const timer = setTimeout(() => {
-        this.pendingRequests.delete(requestId);
-        reject(new Error(`Request timeout for share code: ${shareCode}`));
-      }, 30000);
+    if (this.pendingMatchRequest) {
+      return Promise.reject(new Error("Another share code request is already in flight"));
+    }
 
-      this.pendingRequests.set(requestId, {
-        resolve: (matches) => {
-          clearTimeout(timer);
-          resolve(matches);
-        },
-        reject: (err) => {
-          clearTimeout(timer);
-          reject(err);
-        },
-      });
+    const decoded = parseShareCode(shareCode);
+    if (!decoded) {
+      return Promise.reject(new Error(`Invalid share code format: ${shareCode}`));
+    }
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pendingMatchRequest?.shareCode === shareCode) {
+          this.pendingMatchRequest = null;
+        }
+        reject(new Error(`Request timeout for share code: ${shareCode}`));
+      }, MATCH_REQUEST_TIMEOUT_MS);
+
+      this.pendingMatchRequest = {
+        shareCode,
+        resolve,
+        reject,
+        timer,
+      };
 
       try {
+        if (GC_DEBUG) {
+          console.log(
+            `[steam-sync] GC requestGame ${shareCode} ` +
+              `(matchId=${decoded.matchId}, outcomeId=${decoded.outcomeId}, token=${decoded.token})`
+          );
+        } else {
+          console.log(`[steam-sync] GC requestGame ${shareCode}`);
+        }
         this.csgo.requestGame(shareCode);
       } catch (err) {
         clearTimeout(timer);
-        this.pendingRequests.delete(requestId);
+        this.pendingMatchRequest = null;
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
@@ -280,10 +316,15 @@ export class GcClient extends EventEmitter {
 
   async walkShareCodeChain(
     startShareCode: string,
-    _authCode: string,
+    authCode: string,
     mySteam64Id: string,
+    steamApiKey: string,
     maxMatches = 200
   ): Promise<NormalizedMatch[]> {
+    if (!steamApiKey) {
+      throw new Error("Steam Web API key is required for share code chain walking");
+    }
+
     const results: NormalizedMatch[] = [];
     const seen = new Set<string>();
     let currentCode: string | null = startShareCode;
@@ -297,7 +338,10 @@ export class GcClient extends EventEmitter {
 
       try {
         const matches = await this.requestGame(currentCode);
-        if (!matches.length) break;
+        if (!matches.length) {
+          console.warn(`[steam-sync] GC returned empty matchList for ${currentCode}`);
+          break;
+        }
 
         const normalized = normalizeGcMatch(matches[0], currentCode, mySteam64Id);
         if (normalized) {
@@ -305,11 +349,22 @@ export class GcClient extends EventEmitter {
           count++;
         }
 
-        const prevCode = (matches[0] as Record<string, unknown>).watchablematchinfo
-          ? String((matches[0] as Record<string, unknown>).watchablematchinfo)
-          : null;
-
-        currentCode = prevCode && prevCode.startsWith("CSGO") ? prevCode : null;
+        try {
+          currentCode = await getNextMatchSharingCode(
+            steamApiKey,
+            mySteam64Id,
+            authCode,
+            currentCode
+          );
+          console.log(`[steam-sync] Next share code: ${currentCode}`);
+        } catch (err) {
+          if (err instanceof ShareCodeChainEnd) {
+            console.log(`[steam-sync] Share code chain ended: ${err.message}`);
+          } else {
+            console.error(`[steam-sync] Failed to get next share code after ${currentCode}:`, err);
+          }
+          break;
+        }
 
         await sleep(2000);
       } catch (err) {

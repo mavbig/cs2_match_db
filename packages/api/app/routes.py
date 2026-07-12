@@ -420,6 +420,9 @@ async def trigger_sync(job_type: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid job type")
     job = await create_sync_job(db, job_type)
 
+    if job_type == "steam_gc":
+        await set_setting(db, "steam_sync_force_full", "1")
+
     try:
         arq_redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
         if job_type == "enrichment":
@@ -441,12 +444,20 @@ async def list_sync_jobs(limit: int = 10, db: AsyncSession = Depends(get_db)):
 
 @router.get("/sync/config")
 async def sync_config(db: AsyncSession = Depends(get_db), _: None = Depends(verify_sync_token)):
+    force_full = await get_setting(db, "steam_sync_force_full")
     return {
         "my_steam64_id": await get_my_steam64_id(db),
         "steam_auth_code": await get_setting(db, "steam_auth_code") or settings.steam_auth_code,
         "steam_oldest_share_code": await get_setting(db, "steam_oldest_share_code") or settings.steam_oldest_share_code,
         "steam_api_key": await get_setting(db, "steam_api_key") or settings.steam_api_key,
+        "force_full_sync": force_full == "1",
     }
+
+
+@router.post("/sync/ack-force-full", dependencies=[Depends(verify_sync_token)])
+async def ack_force_full_sync(db: AsyncSession = Depends(get_db)):
+    await set_setting(db, "steam_sync_force_full", None)
+    return {"ok": True}
 
 
 @router.post("/sync/jobs/{job_id}/complete", dependencies=[Depends(verify_sync_token)])

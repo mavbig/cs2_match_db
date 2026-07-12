@@ -50,7 +50,13 @@ export default function SettingsPage() {
     setMessage(null);
     try {
       await api.triggerSync(type);
-      setMessage(`${type} sync triggered.`);
+      if (type === "steam_gc") {
+        setMessage(
+          "Steam full sync queued — steam-sync will start within ~15 seconds. Check progress: docker compose logs -f steam-sync"
+        );
+      } else {
+        setMessage(`${type} sync triggered.`);
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Sync failed");
     }
@@ -105,7 +111,7 @@ export default function SettingsPage() {
           className="card"
           style={{
             marginBottom: "1rem",
-            borderColor: message.includes("success") || message.includes("triggered") ? "var(--accent2)" : "var(--border)",
+            borderColor: message.includes("success") || message.includes("triggered") || message.includes("queued") ? "var(--accent2)" : "var(--border)",
           }}
         >
           {message}

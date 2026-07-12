@@ -1,8 +1,9 @@
-import { completeJob, fetchSyncConfig, postMatches, startJob } from "./api-poster.js";
+import { ackForceFullSync, completeJob, fetchSyncConfig, postMatches, startJob } from "./api-poster.js";
 import { GcClient } from "./gc-client.js";
 import { getAccountName, getClientRefreshToken, getSharedSecret, getRefreshToken, isClientRefreshToken, isThrottleError, loadMaFile, throttleBackoffMs } from "./mafile.js";
 
 const POLL_INTERVAL = Number(process.env.SYNC_POLL_INTERVAL ?? 300) * 1000;
+const TRIGGER_CHECK_INTERVAL = Number(process.env.SYNC_TRIGGER_CHECK_INTERVAL ?? 15) * 1000;
 
 const BOT_USERNAME = process.env.STEAM_BOT_USERNAME ?? "";
 const BOT_PASSWORD = process.env.STEAM_BOT_PASSWORD ?? "";
@@ -144,24 +145,37 @@ async function main(): Promise<void> {
   }
 
   let fullSyncDone = false;
+  let lastSyncRun = 0;
 
   while (true) {
     try {
+      const config = await fetchSyncConfig();
+      const forceFull = Boolean(config?.force_full_sync);
+      const due = Date.now() - lastSyncRun >= POLL_INTERVAL;
+
       if (Date.now() < loginBlockedUntil) {
         const waitMin = Math.ceil((loginBlockedUntil - Date.now()) / 60000);
         console.log(`[steam-sync] Login cooldown active, ${waitMin} min remaining...`);
+      } else if (forceFull) {
+        console.log("[steam-sync] Manual full sync requested from settings");
+        await runFullSync();
+        await ackForceFullSync();
+        fullSyncDone = true;
+        lastSyncRun = Date.now();
       } else if (!fullSyncDone) {
         await runFullSync();
         fullSyncDone = true;
-      } else {
+        lastSyncRun = Date.now();
+      } else if (due) {
         await runIncrementalSync();
+        lastSyncRun = Date.now();
       }
     } catch (err) {
       console.error("[steam-sync] Sync loop error:", err instanceof Error ? err.message : err);
       gcClient = null;
     }
 
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+    await new Promise((r) => setTimeout(r, TRIGGER_CHECK_INTERVAL));
   }
 }
 

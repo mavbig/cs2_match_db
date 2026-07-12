@@ -8,6 +8,7 @@ export async function fetchSyncConfig(): Promise<{
   steam_auth_code: string;
   steam_oldest_share_code: string;
   steam_api_key: string;
+  force_full_sync?: boolean;
 } | null> {
   try {
     const resp = await fetch(`${API_URL}/api/v1/sync/config`, {
@@ -50,6 +51,13 @@ export async function completeJob(jobId: string, matchesImported: number, error?
   const params = new URLSearchParams({ matches_imported: String(matchesImported) });
   if (error) params.set("error", error);
   await fetch(`${API_URL}/api/v1/sync/jobs/${jobId}/complete?${params}`, {
+    method: "POST",
+    headers: { "X-Sync-Token": SYNC_TOKEN },
+  });
+}
+
+export async function ackForceFullSync(): Promise<void> {
+  await fetch(`${API_URL}/api/v1/sync/ack-force-full`, {
     method: "POST",
     headers: { "X-Sync-Token": SYNC_TOKEN },
   });

@@ -72,9 +72,6 @@ services:
       SYNC_POLL_INTERVAL: ${SYNC_POLL_INTERVAL:-300}
     depends_on:
       - api
-    volumes:
-      - ./packages/steam-sync:/app
-      - /app/node_modules
 
   web:
     build:

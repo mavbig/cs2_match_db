@@ -59,7 +59,34 @@ Services:
 6. **FACEIT API Key** — [developers.faceit.com](https://developers.faceit.com/)
 7. **Leetify API Key** (optional) — [leetify.com/app/developer](https://leetify.com/app/developer)
 
-After saving settings, click **Trigger Steam Sync** to start the initial backfill.
+After saving settings, the **steam-sync** service will automatically import your match history (every ~5 minutes). To start immediately:
+
+```bash
+docker compose up -d --build steam-sync
+docker compose logs steam-sync --tail 50
+```
+
+## How match history gets imported
+
+| Source | What it imports | Whose matches |
+|--------|-----------------|---------------|
+| **steam-sync** (automatic) | Valve MM/Premier games via Game Coordinator | **Yours only** (requires auth code + share code + bot account) |
+| **FACEIT sync** | FACEIT games via API | **Yours** (your FACEIT nickname) |
+| **Import Share Code** | One specific game | Any match you have the `CSGO-...` code for |
+| **Player Search** | Profile + stats only | Does **not** import match history |
+
+When **your** matches sync, all **9 other players** in each game are saved automatically. You cannot fetch another player's full Steam match history unless they provide their own auth code (Steam privacy).
+
+## Manual Actions (Settings page)
+
+| Button | What it does |
+|--------|----------------|
+| **Trigger Steam Sync** | Creates a sync job record. The actual Steam import is performed by the **steam-sync** container, which runs automatically on a timer. If matches aren't appearing, check `docker compose logs steam-sync`. |
+| **Trigger FACEIT Sync** | Immediately queues a job to pull **your** FACEIT match history (requires FACEIT API key + nickname in Settings). |
+| **Trigger Enrichment** | Refreshes **stats** for known players (Leetify aim ratings, FACEIT ELO, Steam avatars). Does not import new matches. |
+| **Import Share Code** | Paste a single match code (`CSGO-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`) from CS2 → Watch → Your Matches to import that one game. |
+
+To get a share code in CS2: **Watch → Your Matches → select a match → Copy match sharing code** (bottom right).
 
 ## Oracle Cloud ARM Deployment
 
@@ -104,6 +131,33 @@ docker compose up -d --build web
 ```
 
 You should only need to open **one port** (`WEB_PORT`, default 3472) in your firewall/security list.
+
+### steam-sync crash: `Cannot find module '/app/dist/index.js'`
+
+The host volume mount was overwriting the compiled build inside the container. Pull the latest code and rebuild **without** cached layers:
+
+```bash
+git pull
+docker compose up -d --build --no-cache steam-sync
+docker compose logs steam-sync --tail 30
+```
+
+You should see `[steam-sync] Starting CS2 match sync service` followed by sync activity or a clear configuration message.
+
+### steam-sync runs but imports 0 matches
+
+Check that all of these are set (Settings UI **and/or** `.env`):
+
+- `MY_STEAM64_ID`
+- `STEAM_AUTH_CODE` (Match History Auth Code)
+- `STEAM_OLDEST_SHARE_CODE`
+- `STEAM_BOT_USERNAME` / `STEAM_BOT_PASSWORD` in `.env`
+
+Then inspect logs for GC connection errors:
+
+```bash
+docker compose logs steam-sync --tail 50
+```
 
 ## Bot Account Setup
 
@@ -155,11 +209,7 @@ On any player profile, see **Times Played With You** — how many matches you've
 
 ### Import a single match
 
-Settings → paste a share code → **Import Share Code**
-
-### Manual sync triggers
-
-Settings → **Trigger Steam Sync** / **Trigger FACEIT Sync** / **Trigger Enrichment**
+Settings → paste a share code → **Import Share Code** (see **Manual Actions** above).
 
 ## Project Structure
 

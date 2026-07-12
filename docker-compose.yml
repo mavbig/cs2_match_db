@@ -71,10 +71,12 @@ services:
       API_SYNC_TOKEN: ${API_SYNC_TOKEN:-change-this-sync-token}
       SYNC_POLL_INTERVAL: ${SYNC_POLL_INTERVAL:-300}
       STEAM_SENTRY_DIR: /data/steam
+      STEAM_BOT_MAFILE_PATH: ${STEAM_BOT_MAFILE_PATH:-/run/secrets/maFile.json}
     depends_on:
       - api
     volumes:
       - steam_sentry:/data/steam
+      - ${STEAM_BOT_MAFILE_HOST_PATH:-./secrets}:/run/secrets:ro
 
   web:
     build:

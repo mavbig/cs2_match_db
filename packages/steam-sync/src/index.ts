@@ -1,5 +1,6 @@
 import { completeJob, fetchSyncConfig, postMatches, startJob } from "./api-poster.js";
 import { GcClient } from "./gc-client.js";
+import { getAccountName, getRefreshToken, getSharedSecret, isThrottleError, loadMaFile, throttleBackoffMs } from "./mafile.js";
 
 const POLL_INTERVAL = Number(process.env.SYNC_POLL_INTERVAL ?? 300) * 1000;
 
@@ -9,8 +10,14 @@ const BOT_SHARED_SECRET = process.env.STEAM_BOT_SHARED_SECRET ?? "";
 
 let gcClient: GcClient | null = null;
 let lastSyncedShareCode: string | null = null;
+let loginBlockedUntil = 0;
 
 async function ensureGcConnected(): Promise<GcClient> {
+  if (Date.now() < loginBlockedUntil) {
+    const waitMin = Math.ceil((loginBlockedUntil - Date.now()) / 60000);
+    throw new Error(`Steam login throttled — retry in ~${waitMin} minutes`);
+  }
+
   if (gcClient) {
     try {
       await gcClient.waitForGc(10000);
@@ -20,21 +27,39 @@ async function ensureGcConnected(): Promise<GcClient> {
     }
   }
 
-  if (!BOT_USERNAME || !BOT_PASSWORD) {
-    throw new Error("STEAM_BOT_USERNAME and STEAM_BOT_PASSWORD must be set");
+  const mafile = loadMaFile();
+  const username = getAccountName(mafile, BOT_USERNAME);
+  const refreshToken = getRefreshToken(mafile);
+  const sharedSecret = getSharedSecret(mafile) ?? BOT_SHARED_SECRET.trim();
+
+  if (!username) {
+    throw new Error("Set STEAM_BOT_USERNAME or use a maFile with account_name");
   }
 
-  const sharedSecret = BOT_SHARED_SECRET.trim();
-  if (!sharedSecret && !process.env.STEAM_BOT_MAFILE_PATH?.trim()) {
+  if (!refreshToken && (!BOT_PASSWORD || !sharedSecret)) {
     throw new Error(
-      "STEAM_BOT_SHARED_SECRET is required for TOTP. Add shared_secret from the bot .maFile to .env"
+      "Set STEAM_BOT_MAFILE_PATH (recommended, uses Session.RefreshToken), " +
+        "or STEAM_BOT_PASSWORD + STEAM_BOT_SHARED_SECRET"
     );
   }
 
   gcClient = new GcClient();
-  await gcClient.login(BOT_USERNAME, BOT_PASSWORD, sharedSecret || undefined);
-  await gcClient.waitForGc();
-  return gcClient;
+  try {
+    await gcClient.login(username, BOT_PASSWORD, sharedSecret || undefined);
+    await gcClient.waitForGc();
+    return gcClient;
+  } catch (err) {
+    gcClient = null;
+    if (isThrottleError(err)) {
+      loginBlockedUntil = Date.now() + throttleBackoffMs();
+      console.error(
+        `[steam-sync] AccountLoginDeniedThrottle — too many login attempts. ` +
+          `Waiting ${Math.round(throttleBackoffMs() / 60000)} minutes. ` +
+          `Stop the container with: docker compose stop steam-sync`
+      );
+    }
+    throw err;
+  }
 }
 
 async function runFullSync(): Promise<number> {
@@ -110,18 +135,26 @@ async function main(): Promise<void> {
   console.log("[steam-sync] Starting CS2 match sync service");
   console.log(`[steam-sync] Poll interval: ${POLL_INTERVAL / 1000}s`);
 
+  const mafile = loadMaFile();
+  if (mafile?.Session?.RefreshToken) {
+    console.log("[steam-sync] maFile detected with RefreshToken — will use token login");
+  }
+
   let fullSyncDone = false;
 
   while (true) {
     try {
-      if (!fullSyncDone) {
-        const count = await runFullSync();
-        fullSyncDone = count >= 0;
+      if (Date.now() < loginBlockedUntil) {
+        const waitMin = Math.ceil((loginBlockedUntil - Date.now()) / 60000);
+        console.log(`[steam-sync] Login cooldown active, ${waitMin} min remaining...`);
+      } else if (!fullSyncDone) {
+        await runFullSync();
+        fullSyncDone = true;
       } else {
         await runIncrementalSync();
       }
     } catch (err) {
-      console.error("[steam-sync] Sync loop error:", err);
+      console.error("[steam-sync] Sync loop error:", err instanceof Error ? err.message : err);
       gcClient = null;
     }
 

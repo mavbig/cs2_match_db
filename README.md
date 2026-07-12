@@ -196,15 +196,47 @@ The bot runs **headless in Docker** — it cannot type a Steam Guard code intera
 
 The service auto-generates fresh TOTP codes every login using this secret — same as the Steam app, but automated.
 
-#### Option B — Mount the whole `.maFile`
+#### Option B — Mount the full `.maFile` (recommended)
 
-```yaml
-# docker-compose.yml → steam-sync service (optional)
-volumes:
-  - ./secrets/bot.maFile:/run/secrets/steam_bot.maFile:ro
-environment:
-  STEAM_BOT_MAFILE_PATH: /run/secrets/steam_bot.maFile
-```
+Modern SDA / steamguard-cli maFiles include `Session.RefreshToken` — the app uses this first (no TOTP code each login).
+
+1. Copy your bot's maFile to the server (never commit to git):
+   ```bash
+   mkdir -p ~/cs2_match_db/secrets
+   nano ~/cs2_match_db/secrets/maFile.json   # paste full JSON from SDA
+   chmod 600 ~/cs2_match_db/secrets/maFile.json
+   ```
+
+2. In `.env` (optional overrides):
+   ```env
+   STEAM_BOT_MAFILE_HOST_PATH=./secrets
+   STEAM_BOT_MAFILE_PATH=/run/secrets/maFile.json
+   STEAM_BOT_USERNAME=mav_small
+   ```
+
+3. Rebuild:
+   ```bash
+   docker compose up -d --build steam-sync
+   ```
+
+Logs should show: `Logging in bot account (refresh token from maFile)...`
+
+#### AccountLoginDeniedThrottle
+
+Steam temporarily blocks login after too many failed/repeated attempts (the crash-restart loop makes this worse).
+
+1. **Stop** the container immediately:
+   ```bash
+   docker compose stop steam-sync
+   ```
+2. **Wait 30–60 minutes** (or up to a few hours in bad cases)
+3. Fix credentials / mount maFile, then start again:
+   ```bash
+   docker compose up -d steam-sync
+   docker compose logs steam-sync -f
+   ```
+
+Do not restart repeatedly while throttled — it extends the lockout.
 
 #### Sentry file (remember this device)
 

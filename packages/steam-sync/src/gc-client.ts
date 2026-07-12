@@ -5,6 +5,12 @@ import SteamTotp from "steam-totp";
 import GlobalOffensive from "globaloffensive";
 import { EventEmitter } from "events";
 
+import {
+  getAccountName,
+  getRefreshToken,
+  getSharedSecret,
+  loadMaFile,
+} from "./mafile.js";
 import { normalizeGcMatch, parseShareCode } from "./match-parser.js";
 import type { NormalizedMatch } from "./match-parser.js";
 
@@ -15,20 +21,6 @@ function sentryPath(username: string): string {
   return path.join(SENTRY_DIR, `${safe}.sentry`);
 }
 
-function readSharedSecret(): string | undefined {
-  const fromEnv = process.env.STEAM_BOT_SHARED_SECRET?.trim();
-  if (fromEnv) return fromEnv;
-
-  const mafilePath = process.env.STEAM_BOT_MAFILE_PATH?.trim();
-  if (mafilePath && fs.existsSync(mafilePath)) {
-    const raw = fs.readFileSync(mafilePath, "utf8");
-    const parsed = JSON.parse(raw) as { shared_secret?: string };
-    if (parsed.shared_secret) return parsed.shared_secret;
-  }
-
-  return undefined;
-}
-
 export class GcClient extends EventEmitter {
   private user: InstanceType<typeof SteamUser>;
   private csgo: InstanceType<typeof GlobalOffensive>;
@@ -37,8 +29,13 @@ export class GcClient extends EventEmitter {
 
   constructor() {
     super();
-    this.user = new SteamUser({ promptSteamGuardCode: false });
+    // Prevent interactive stdin prompts in Docker.
+    this.user = new SteamUser({ promptSteamGuardCode: false, autoRelogin: true });
     this.csgo = new GlobalOffensive(this.user);
+
+    this.on("error", () => {
+      /* default handler so login errors do not crash the process */
+    });
 
     this.user.on("loggedOn", () => {
       console.log("[steam-sync] Logged on to Steam");
@@ -46,8 +43,7 @@ export class GcClient extends EventEmitter {
     });
 
     this.user.on("error", (err: Error) => {
-      console.error("[steam-sync] Steam error:", err.message);
-      this.emit("error", err);
+      console.error("[steam-sync] Steam client error:", err.message);
     });
 
     this.csgo.on("connectedToGC", () => {
@@ -71,39 +67,79 @@ export class GcClient extends EventEmitter {
     });
   }
 
-  login(username: string, password: string, sharedSecret?: string): Promise<void> {
-    const secret = sharedSecret ?? readSharedSecret();
+  async login(username: string, password: string, sharedSecret?: string): Promise<void> {
+    const mafile = loadMaFile();
+    const refreshToken = getRefreshToken(mafile);
+    const accountName = getAccountName(mafile, username);
 
-    if (!secret) {
-      return Promise.reject(
-        new Error(
-          "STEAM_BOT_SHARED_SECRET is required (Mobile Authenticator / TOTP). " +
-            "Copy shared_secret from the bot account .maFile into .env, " +
-            "or set STEAM_BOT_MAFILE_PATH to the maFile JSON path. " +
-            "See README → Bot Account Setup → Steam Guard (TOTP)."
-        )
-      );
+    if (refreshToken) {
+      try {
+        await this.logOn({ refreshToken }, accountName, "refresh token from maFile");
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[steam-sync] Refresh token login failed (${msg}), trying password + TOTP...`);
+      }
     }
 
-    return new Promise((resolve, reject) => {
-      const logOnOptions: Record<string, unknown> = {
-        accountName: username,
+    const secret = sharedSecret ?? getSharedSecret(mafile);
+    if (!secret) {
+      throw new Error(
+        "Missing credentials: set STEAM_BOT_MAFILE_PATH to your .maFile (with Session.RefreshToken), " +
+          "or set STEAM_BOT_SHARED_SECRET + STEAM_BOT_PASSWORD. See README → Steam Guard (TOTP)."
+      );
+    }
+    if (!password) {
+      throw new Error("STEAM_BOT_PASSWORD is required when refresh token login is unavailable.");
+    }
+
+    await this.logOn(
+      {
+        accountName,
         password,
         twoFactorCode: SteamTotp.generateAuthCode(secret),
-      };
+      },
+      accountName,
+      "password + TOTP"
+    );
+  }
 
+  private logOn(
+    logOnOptions: Record<string, unknown>,
+    accountName: string,
+    method: string
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
       fs.mkdirSync(SENTRY_DIR, { recursive: true });
-      const sentryFile = sentryPath(username);
-      if (fs.existsSync(sentryFile)) {
+      const sentryFile = sentryPath(accountName);
+
+      if (!logOnOptions.refreshToken && fs.existsSync(sentryFile)) {
         logOnOptions.sentry = fs.readFileSync(sentryFile);
-        console.log("[steam-sync] Using saved sentry file for", username);
+        console.log("[steam-sync] Using saved sentry file for", accountName);
       }
 
+      const cleanup = () => {
+        this.user.off("loggedOn", onLoggedOn);
+        this.user.off("error", onError);
+        this.user.off("steamGuard", onSteamGuard);
+        this.user.off("sentry", onSentry);
+      };
+
+      const onLoggedOn = () => {
+        cleanup();
+        resolve();
+      };
+
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+
       const onSteamGuard = () => {
+        cleanup();
         reject(
           new Error(
-            "Bot account uses email Steam Guard. Use a Mobile Authenticator bot account " +
-              "and set STEAM_BOT_SHARED_SECRET from the .maFile shared_secret field."
+            "Bot account uses email Steam Guard. Link Mobile Authenticator and use .maFile with shared_secret."
           )
         );
       };
@@ -113,20 +149,12 @@ export class GcClient extends EventEmitter {
         console.log("[steam-sync] Saved sentry file for future logins");
       };
 
-      this.user.once("loggedOn", () => {
-        this.user.off("steamGuard", onSteamGuard);
-        resolve();
-      });
-
-      this.user.once("error", (err: Error) => {
-        this.user.off("steamGuard", onSteamGuard);
-        reject(err);
-      });
-
+      this.user.once("loggedOn", onLoggedOn);
+      this.user.once("error", onError);
       this.user.once("steamGuard", onSteamGuard);
       this.user.once("sentry", onSentry);
 
-      console.log("[steam-sync] Logging in bot account with auto-generated TOTP code...");
+      console.log(`[steam-sync] Logging in bot account (${method})...`);
       this.user.logOn(logOnOptions);
     });
   }
@@ -179,7 +207,7 @@ export class GcClient extends EventEmitter {
 
   async walkShareCodeChain(
     startShareCode: string,
-    authCode: string,
+    _authCode: string,
     mySteam64Id: string,
     maxMatches = 200
   ): Promise<NormalizedMatch[]> {
@@ -225,4 +253,4 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export { parseShareCode, readSharedSecret };
+export { parseShareCode };

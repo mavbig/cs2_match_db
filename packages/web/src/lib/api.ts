@@ -1,17 +1,26 @@
+// Browser calls same-origin /api/v1/* (proxied by Next.js to the FastAPI backend).
+// Server components use API_INTERNAL_URL inside Docker.
 const API_URL =
   typeof window === "undefined"
     ? process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
-    : process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    : "";
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
-  const resp = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-    cache: "no-store",
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error(
+      "Could not reach the API. If you access the site remotely, rebuild the web container after pulling the latest code."
+    );
+  }
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(text || `API error ${resp.status}`);

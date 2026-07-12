@@ -80,21 +80,30 @@ docker compose up -d --build
 ```
 
 Open ports in Oracle Cloud security list:
-- **3472** (or your `WEB_PORT`) — Web UI (or put Caddy/nginx in front on 443)
-- **8000** — API (optional if only accessing via web)
+- **3472** (or your `WEB_PORT`) — Web UI only (API is proxied through the web app; port 8000 does not need to be public)
 
 For production, add a reverse proxy with TLS (Caddy recommended):
 
 ```
 your-domain.com {
     reverse_proxy web:3000
-    handle /api/* {
-        reverse_proxy api:8000
-    }
 }
 ```
 
-Set `NEXT_PUBLIC_API_URL=https://your-domain.com` in `.env`.
+The web app proxies `/api/v1/*` to the FastAPI backend internally — you only need to expose the web port.
+
+## Troubleshooting
+
+### "Failed to fetch" on Search or Settings
+
+This usually means the browser tried to call `localhost:8000` instead of your VM. Pull the latest code and rebuild the web container:
+
+```bash
+git pull
+docker compose up -d --build web
+```
+
+You should only need to open **one port** (`WEB_PORT`, default 3472) in your firewall/security list.
 
 ## Bot Account Setup
 

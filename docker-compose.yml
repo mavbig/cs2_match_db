@@ -52,6 +52,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cs2match}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-cs2match}
       REDIS_URL: redis://redis:6379/0
+      API_INTERNAL_URL: http://api:8000
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,6 +71,7 @@ services:
       API_URL: http://api:8000
       API_SYNC_TOKEN: ${API_SYNC_TOKEN:-change-this-sync-token}
       SYNC_POLL_INTERVAL: ${SYNC_POLL_INTERVAL:-300}
+      SYNC_MATCH_DELAY_MS: ${SYNC_MATCH_DELAY_MS:-500}
       STEAM_SENTRY_DIR: /data/steam
       STEAM_BOT_MAFILE_PATH: ${STEAM_BOT_MAFILE_PATH:-/run/secrets/maFile.json}
     depends_on:

@@ -98,7 +98,18 @@ export interface MatchDetail extends MatchSummary {
   source_match_id: string;
   duration_seconds: number | null;
   share_code: string | null;
+  demo_url: string | null;
   players: MatchPlayer[];
+}
+
+export interface MatchSyncResult {
+  match_id: string;
+  sources: string[];
+  errors: string[];
+  demo_url: string | null;
+  map: string | null;
+  score_team_a: number | null;
+  score_team_b: number | null;
 }
 
 export interface PlayerDetail extends Player {
@@ -151,6 +162,9 @@ export const api = {
   matchCount: () => fetchApi<MatchCount>("/api/v1/matches/count"),
   match: (id: string) => fetchApi<MatchDetail>(`/api/v1/matches/${id}`),
   matchGcDebug: (id: string) => fetchApi<MatchGcDebug>(`/api/v1/matches/${id}/gc-debug`),
+  syncMatch: (id: string) =>
+    fetchApi<MatchSyncResult>(`/api/v1/matches/${id}/sync`, { method: "POST" }),
+  matchDemoUrl: (id: string) => fetchApi<{ demo_url: string }>(`/api/v1/matches/${id}/demo-url`),
   searchPlayers: (q: string) => fetchApi<{ players: Player[] }>(`/api/v1/players?q=${encodeURIComponent(q)}`),
   player: (id: string) => fetchApi<PlayerDetail>(`/api/v1/players/${id}`),
   playerMatches: (id: string, limit = 100, offset = 0) =>

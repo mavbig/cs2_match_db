@@ -45,6 +45,7 @@ from app.services.match_service import (
     set_setting,
     upsert_player,
 )
+from app.services.leetify_sync import extract_demo_url_from_gc, sync_match_from_sources
 from app.services.steam_client import SteamClient
 
 router = APIRouter(prefix="/api/v1", tags=["api"])
@@ -94,6 +95,7 @@ def _match_to_out(match: Match) -> MatchOut:
         score_team_b=match.score_team_b,
         duration_seconds=match.duration_seconds,
         share_code=match.share_code,
+        demo_url=extract_demo_url_from_gc(match.raw_payload),
         players=players,
     )
 
@@ -157,27 +159,31 @@ async def list_matches(
 def _gc_parse_hints(raw: dict | None) -> dict | None:
     if not raw:
         return None
+    from app.services.leetify_sync import reparse_gc_payload
 
     all_rs = raw.get("roundstatsall") or []
     if all_rs:
-        def score_total(entry: dict) -> int:
-            scores = entry.get("team_scores") or []
-            return sum(scores[:2]) if len(scores) >= 2 else 0
-
-        meaningful = [e for e in all_rs if score_total(e) >= 8]
-        pool = meaningful or all_rs
-        last = sorted(pool, key=lambda e: e.get("round") or 0)[-1]
+        with_result = [e for e in all_rs if e.get("match_result") not in (None, 0)]
+        if with_result:
+            last = with_result[-1]
+        else:
+            last = max(
+                all_rs,
+                key=lambda e: sum((e.get("team_scores") or [])[:2]) if e.get("team_scores") else 0,
+            )
     else:
         last = raw.get("roundstats_legacy") or {}
 
     reservation = last.get("reservation") or {}
     watchable = raw.get("watchablematchinfo") or {}
     rankings = reservation.get("rankings") or []
+    parsed = reparse_gc_payload(raw)
 
     return {
         "roundstats_count": len(all_rs),
         "picked_round": last.get("round"),
         "picked_team_scores": last.get("team_scores"),
+        "parsed_scores": [parsed.get("score_team_a"), parsed.get("score_team_b")],
         "game_type": reservation.get("game_type"),
         "rank_type_ids": [r.get("rank_type_id") for r in rankings if r.get("rank_type_id") is not None],
         "watchable_game_map": watchable.get("game_map"),
@@ -191,6 +197,27 @@ def _gc_parse_hints(raw: dict | None) -> dict | None:
 async def count_matches(db: AsyncSession = Depends(get_db)):
     total = await db.scalar(select(func.count()).select_from(Match))
     return {"total": total or 0}
+
+
+@router.post("/matches/{match_id}/sync")
+async def sync_match(match_id: UUID, db: AsyncSession = Depends(get_db)):
+    try:
+        result = await sync_match_from_sources(db, match_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await db.commit()
+    return result
+
+
+@router.get("/matches/{match_id}/demo-url")
+async def get_match_demo_url(match_id: UUID, db: AsyncSession = Depends(get_db)):
+    match = await get_match_with_players(db, match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+    demo_url = extract_demo_url_from_gc(match.raw_payload)
+    if not demo_url:
+        raise HTTPException(status_code=404, detail="No demo URL available for this match")
+    return {"demo_url": demo_url}
 
 
 @router.get("/matches/{match_id}/gc-debug")
@@ -490,7 +517,7 @@ async def update_settings(body: SettingsUpdateIn, db: AsyncSession = Depends(get
 
 @router.post("/sync/trigger/{job_type}", response_model=SyncJobOut)
 async def trigger_sync(job_type: str, db: AsyncSession = Depends(get_db)):
-    if job_type not in ("steam_gc", "faceit", "enrichment"):
+    if job_type not in ("steam_gc", "faceit", "enrichment", "leetify"):
         raise HTTPException(status_code=400, detail="Invalid job type")
     job = await create_sync_job(db, job_type)
 
@@ -503,6 +530,8 @@ async def trigger_sync(job_type: str, db: AsyncSession = Depends(get_db)):
             await arq_redis.enqueue_job("run_enrichment_batch")
         elif job_type == "faceit":
             await arq_redis.enqueue_job("sync_faceit_matches")
+        elif job_type == "leetify":
+            await arq_redis.enqueue_job("sync_leetify_matches")
         await arq_redis.aclose()
     except Exception:
         pass

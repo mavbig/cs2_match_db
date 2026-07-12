@@ -748,9 +748,47 @@ async def run_enrichment_batch(ctx):
         await enrich_player(ctx, pid)
 
 
+async def sync_leetify_matches(ctx):
+    from sqlalchemy import text
+
+    async with Session() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT id FROM matches
+                WHERE share_code IS NOT NULL
+                   OR source = 'faceit'
+                ORDER BY played_at DESC NULLS LAST
+                """
+            )
+        )
+        match_ids = [str(row[0]) for row in result.fetchall()]
+
+    if not match_ids:
+        logger.info("Leetify bulk sync: no matches to process")
+        return
+
+    synced = 0
+    failed = 0
+    async with httpx.AsyncClient(base_url=settings.api_internal_url, timeout=120.0) as client:
+        for match_id in match_ids:
+            try:
+                resp = await client.post(f"/api/v1/matches/{match_id}/sync")
+                if resp.is_success:
+                    synced += 1
+                else:
+                    failed += 1
+                    logger.warning("Leetify sync HTTP %s for match %s", resp.status_code, match_id)
+            except Exception as exc:
+                failed += 1
+                logger.warning("Leetify sync failed for match %s: %s", match_id, exc)
+
+    logger.info("Leetify bulk sync finished: %d ok, %d failed, %d total", synced, failed, len(match_ids))
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [enrich_player, sync_faceit_matches, process_enrichment_jobs, run_enrichment_batch]
+    functions = [enrich_player, sync_faceit_matches, process_enrichment_jobs, run_enrichment_batch, sync_leetify_matches]
     cron_jobs = [
         cron(sync_faceit_matches, hour={0, 6, 12, 18}, minute=0),
         cron(process_enrichment_jobs, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),

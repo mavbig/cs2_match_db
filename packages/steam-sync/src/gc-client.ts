@@ -17,6 +17,8 @@ import { normalizeGcMatch, parseShareCode, buildGcParseDebug } from "./match-par
 import type { NormalizedMatch } from "./match-parser.js";
 import { getNextMatchSharingCode, ShareCodeChainEnd } from "./steam-api.js";
 
+const MATCH_CHAIN_DELAY_MS = Number(process.env.SYNC_MATCH_DELAY_MS ?? 500);
+
 const SENTRY_DIR = process.env.STEAM_SENTRY_DIR ?? "/data/steam";
 const GC_CONNECT_TIMEOUT_MS = Number(process.env.GC_CONNECT_TIMEOUT_MS ?? 180_000);
 const MATCH_REQUEST_TIMEOUT_MS = Number(process.env.MATCH_REQUEST_TIMEOUT_MS ?? 45_000);
@@ -369,7 +371,7 @@ export class GcClient extends EventEmitter {
           break;
         }
 
-        await sleep(2000);
+        await sleep(MATCH_CHAIN_DELAY_MS);
       } catch (err) {
         console.error(`[steam-sync] Error fetching ${currentCode}:`, err);
         break;

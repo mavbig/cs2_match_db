@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { MatchActions } from "@/components/MatchActions";
 import { MatchDebugPanel } from "@/components/MatchDebugPanel";
 import { api, formatDate, formatMap, formatMatchScore } from "@/lib/api";
 
@@ -65,6 +66,7 @@ export default async function MatchDetailPage({
             </Link>
           )}
         </div>
+        <MatchActions matchId={id} demoUrl={match.demo_url} />
       </div>
 
       <div className="card">

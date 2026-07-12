@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     faceit_nickname: str = ""
     leetify_api_key: str = ""
     my_steam64_id: str = ""
+    api_internal_url: str = "http://api:8000"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

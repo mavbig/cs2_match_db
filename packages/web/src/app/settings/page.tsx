@@ -224,6 +224,9 @@ export default function SettingsPage() {
           <button type="button" className="btn" onClick={() => triggerSync("enrichment")}>
             Trigger Enrichment
           </button>
+          <button type="button" className="btn" onClick={() => triggerSync("leetify")}>
+            Sync Leetify (all matches)
+          </button>
         </div>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>

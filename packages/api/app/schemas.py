@@ -64,6 +64,7 @@ class MatchOut(BaseModel):
     score_team_b: int | None
     duration_seconds: int | None
     share_code: str | None
+    demo_url: str | None = None
     players: list[MatchPlayerOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

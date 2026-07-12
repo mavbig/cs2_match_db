@@ -40,3 +40,14 @@ class LeetifyClient:
                 return None
             resp.raise_for_status()
             return resp.json()
+
+    async def get_match_by_source(self, data_source: str, data_source_id: str) -> dict | None:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self.BASE}/v2/matches/{data_source}/{data_source_id}",
+                headers=self._headers(),
+            )
+            if resp.status_code in (404, 401):
+                return None
+            resp.raise_for_status()
+            return resp.json()

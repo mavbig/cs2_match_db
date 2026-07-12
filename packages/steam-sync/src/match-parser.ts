@@ -120,10 +120,15 @@ function teamScoreTotal(entry: Record<string, unknown>): number {
 function pickFinalRoundStats(match: Record<string, unknown>): Record<string, unknown> {
   const all = (match.roundstatsall as Record<string, unknown>[]) ?? [];
   if (all.length) {
-    const withMeaningfulScore = all.filter((entry) => teamScoreTotal(entry) >= 8);
-    const pool = withMeaningfulScore.length ? withMeaningfulScore : all;
-    const sorted = [...pool].sort((a, b) => Number(b.round ?? 0) - Number(a.round ?? 0));
-    return sorted[0] ?? all[all.length - 1];
+    const withMatchResult = all.filter(
+      (entry) => entry.match_result != null && entry.match_result !== 0
+    );
+    if (withMatchResult.length) {
+      return withMatchResult[withMatchResult.length - 1];
+    }
+
+    const byScoreSum = [...all].sort((a, b) => teamScoreTotal(b) - teamScoreTotal(a));
+    return byScoreSum[0] ?? all[all.length - 1];
   }
 
   return asRecord(match.roundstats_legacy) ?? {};

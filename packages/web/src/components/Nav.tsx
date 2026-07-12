@@ -38,62 +38,6 @@ export function Nav() {
           })}
         </nav>
       </div>
-      <style jsx>{`
-        .site-header {
-          border-bottom: 1px solid var(--border);
-          background: rgba(17, 24, 32, 0.85);
-          backdrop-filter: blur(12px);
-          position: sticky;
-          top: 0;
-          z-index: 50;
-        }
-        .site-header-inner {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          height: 4rem;
-          gap: 1rem;
-        }
-        .brand-link {
-          display: flex;
-          align-items: center;
-          flex-shrink: 0;
-        }
-        .brand-link:hover {
-          opacity: 0.92;
-        }
-        .site-nav {
-          display: flex;
-          gap: 0.25rem;
-          flex-wrap: wrap;
-          justify-content: flex-end;
-        }
-        .nav-link {
-          padding: 0.45rem 0.9rem;
-          border-radius: var(--radius);
-          color: var(--muted);
-          font-size: 0.9rem;
-          font-weight: 500;
-          transition: background 0.15s, color 0.15s;
-        }
-        .nav-link:hover {
-          color: var(--text);
-          background: var(--surface2);
-        }
-        .nav-link.is-active {
-          color: var(--accent);
-          background: rgba(59, 158, 255, 0.1);
-          font-weight: 600;
-        }
-        @media (max-width: 640px) {
-          .site-header-inner {
-            flex-direction: column;
-            height: auto;
-            padding-top: 0.75rem;
-            padding-bottom: 0.75rem;
-          }
-        }
-      `}</style>
     </header>
   );
 }

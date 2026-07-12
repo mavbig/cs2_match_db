@@ -24,8 +24,15 @@ async function ensureGcConnected(): Promise<GcClient> {
     throw new Error("STEAM_BOT_USERNAME and STEAM_BOT_PASSWORD must be set");
   }
 
+  const sharedSecret = BOT_SHARED_SECRET.trim();
+  if (!sharedSecret && !process.env.STEAM_BOT_MAFILE_PATH?.trim()) {
+    throw new Error(
+      "STEAM_BOT_SHARED_SECRET is required for TOTP. Add shared_secret from the bot .maFile to .env"
+    );
+  }
+
   gcClient = new GcClient();
-  await gcClient.login(BOT_USERNAME, BOT_PASSWORD, BOT_SHARED_SECRET || undefined);
+  await gcClient.login(BOT_USERNAME, BOT_PASSWORD, sharedSecret || undefined);
   await gcClient.waitForGc();
   return gcClient;
 }

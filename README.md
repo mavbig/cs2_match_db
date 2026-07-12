@@ -169,11 +169,56 @@ The `steam-sync` service needs a **dedicated Steam bot account** to connect to t
    ```
    STEAM_BOT_USERNAME=your_bot_username
    STEAM_BOT_PASSWORD=your_bot_password
-   STEAM_BOT_SHARED_SECRET=   # optional, from Steam Desktop Authenticator .maFile
+   STEAM_BOT_SHARED_SECRET=your_shared_secret_from_mafile
    ```
-4. If using 2FA, extract `shared_secret` from the bot's `.maFile`
 
 Your **personal Steam login is never stored** — only the read-only Match History Auth Code.
+
+### Steam Guard (TOTP) for the bot account
+
+The bot runs **headless in Docker** — it cannot type a Steam Guard code interactively. If you see `Steam Guard Code:` in the logs, the bot account uses Mobile Authenticator but `STEAM_BOT_SHARED_SECRET` is missing or wrong.
+
+**You need the `shared_secret` from a `.maFile`**, not a one-time code from your phone app.
+
+#### Option A — Steam Desktop Authenticator (SDA) on a PC
+
+1. Install [Steam Desktop Authenticator](https://github.com/Jessecar96/SteamDesktopAuthenticator) on a Windows PC (one-time setup)
+2. Link the **bot account** to Mobile Authenticator via SDA
+3. Open the bot's `.maFile` (JSON) in `Steam Desktop Authenticator/maFiles/`
+4. Copy the **`shared_secret`** value (base64 string, ~28 characters) into `.env`:
+   ```
+   STEAM_BOT_SHARED_SECRET=yeBrc0jD9Ff0kjKOx8+hnckVojg=
+   ```
+5. Rebuild steam-sync:
+   ```bash
+   docker compose up -d --build steam-sync
+   ```
+
+The service auto-generates fresh TOTP codes every login using this secret — same as the Steam app, but automated.
+
+#### Option B — Mount the whole `.maFile`
+
+```yaml
+# docker-compose.yml → steam-sync service (optional)
+volumes:
+  - ./secrets/bot.maFile:/run/secrets/steam_bot.maFile:ro
+environment:
+  STEAM_BOT_MAFILE_PATH: /run/secrets/steam_bot.maFile
+```
+
+#### Sentry file (remember this device)
+
+After the first successful login, a **sentry file** is saved to the `steam_sentry` Docker volume so future logins need fewer challenges. You should see `Saved sentry file for future logins` in the logs.
+
+#### Do not use
+
+- **Email Steam Guard** — cannot be automated headlessly
+- **One-time codes from your phone** — they expire in 30 seconds and cannot be pasted into Docker reliably
+- **`identity_secret`** from the maFile — that is for trade confirmations, not login TOTP
+
+#### Simplest alternative
+
+Create the bot account **without** Mobile Authenticator only if Steam allows it (rare for new accounts). Most setups require Option A above.
 
 ## Environment Variables
 
@@ -185,7 +230,7 @@ Your **personal Steam login is never stored** — only the read-only Match Histo
 | `MY_STEAM64_ID` | Yes | Your Steam64 ID |
 | `STEAM_BOT_USERNAME` | Yes | Bot account for GC connection |
 | `STEAM_BOT_PASSWORD` | Yes | Bot account password |
-| `STEAM_BOT_SHARED_SECRET` | No | 2FA shared secret for bot |
+| `STEAM_BOT_SHARED_SECRET` | **Yes** (if Mobile 2FA) | `shared_secret` from bot `.maFile` — auto-generates TOTP codes |
 | `STEAM_API_KEY` | Yes | Steam Web API key |
 | `STEAM_AUTH_CODE` | Yes* | Match History Auth Code (*or set via UI) |
 | `STEAM_OLDEST_SHARE_CODE` | Yes* | Seed share code for backfill |

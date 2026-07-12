@@ -70,8 +70,11 @@ services:
       API_URL: http://api:8000
       API_SYNC_TOKEN: ${API_SYNC_TOKEN:-change-this-sync-token}
       SYNC_POLL_INTERVAL: ${SYNC_POLL_INTERVAL:-300}
+      STEAM_SENTRY_DIR: /data/steam
     depends_on:
       - api
+    volumes:
+      - steam_sentry:/data/steam
 
   web:
     build:
@@ -90,3 +93,4 @@ services:
 
 volumes:
   postgres_data:
+  steam_sentry:

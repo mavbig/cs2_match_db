@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import SteamUser from "steam-user";
 import SteamTotp from "steam-totp";
 import GlobalOffensive from "globaloffensive";
@@ -5,6 +7,27 @@ import { EventEmitter } from "events";
 
 import { normalizeGcMatch, parseShareCode } from "./match-parser.js";
 import type { NormalizedMatch } from "./match-parser.js";
+
+const SENTRY_DIR = process.env.STEAM_SENTRY_DIR ?? "/data/steam";
+
+function sentryPath(username: string): string {
+  const safe = username.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return path.join(SENTRY_DIR, `${safe}.sentry`);
+}
+
+function readSharedSecret(): string | undefined {
+  const fromEnv = process.env.STEAM_BOT_SHARED_SECRET?.trim();
+  if (fromEnv) return fromEnv;
+
+  const mafilePath = process.env.STEAM_BOT_MAFILE_PATH?.trim();
+  if (mafilePath && fs.existsSync(mafilePath)) {
+    const raw = fs.readFileSync(mafilePath, "utf8");
+    const parsed = JSON.parse(raw) as { shared_secret?: string };
+    if (parsed.shared_secret) return parsed.shared_secret;
+  }
+
+  return undefined;
+}
 
 export class GcClient extends EventEmitter {
   private user: InstanceType<typeof SteamUser>;
@@ -14,7 +37,7 @@ export class GcClient extends EventEmitter {
 
   constructor() {
     super();
-    this.user = new SteamUser();
+    this.user = new SteamUser({ promptSteamGuardCode: false });
     this.csgo = new GlobalOffensive(this.user);
 
     this.user.on("loggedOn", () => {
@@ -49,15 +72,61 @@ export class GcClient extends EventEmitter {
   }
 
   login(username: string, password: string, sharedSecret?: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const logOnOptions: Record<string, string> = { accountName: username, password };
+    const secret = sharedSecret ?? readSharedSecret();
 
-      if (sharedSecret) {
-        logOnOptions.twoFactorCode = SteamTotp.generateAuthCode(sharedSecret);
+    if (!secret) {
+      return Promise.reject(
+        new Error(
+          "STEAM_BOT_SHARED_SECRET is required (Mobile Authenticator / TOTP). " +
+            "Copy shared_secret from the bot account .maFile into .env, " +
+            "or set STEAM_BOT_MAFILE_PATH to the maFile JSON path. " +
+            "See README → Bot Account Setup → Steam Guard (TOTP)."
+        )
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const logOnOptions: Record<string, unknown> = {
+        accountName: username,
+        password,
+        twoFactorCode: SteamTotp.generateAuthCode(secret),
+      };
+
+      fs.mkdirSync(SENTRY_DIR, { recursive: true });
+      const sentryFile = sentryPath(username);
+      if (fs.existsSync(sentryFile)) {
+        logOnOptions.sentry = fs.readFileSync(sentryFile);
+        console.log("[steam-sync] Using saved sentry file for", username);
       }
 
-      this.user.once("loggedOn", () => resolve());
-      this.user.once("error", reject);
+      const onSteamGuard = () => {
+        reject(
+          new Error(
+            "Bot account uses email Steam Guard. Use a Mobile Authenticator bot account " +
+              "and set STEAM_BOT_SHARED_SECRET from the .maFile shared_secret field."
+          )
+        );
+      };
+
+      const onSentry = (sentry: Buffer) => {
+        fs.writeFileSync(sentryFile, sentry);
+        console.log("[steam-sync] Saved sentry file for future logins");
+      };
+
+      this.user.once("loggedOn", () => {
+        this.user.off("steamGuard", onSteamGuard);
+        resolve();
+      });
+
+      this.user.once("error", (err: Error) => {
+        this.user.off("steamGuard", onSteamGuard);
+        reject(err);
+      });
+
+      this.user.once("steamGuard", onSteamGuard);
+      this.user.once("sentry", onSentry);
+
+      console.log("[steam-sync] Logging in bot account with auto-generated TOTP code...");
       this.user.logOn(logOnOptions);
     });
   }
@@ -156,4 +225,4 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export { parseShareCode };
+export { parseShareCode, readSharedSecret };

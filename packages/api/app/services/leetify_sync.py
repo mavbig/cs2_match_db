@@ -258,7 +258,7 @@ async def sync_match_from_sources(db: AsyncSession, match_id: UUID) -> dict:
     if leetify_key and (match.share_code or match.source == "faceit" or _leetify_game_id_from_match(match)):
         client = LeetifyClient(leetify_key)
         try:
-            leetify_data, lookup = await client.resolve_match(
+            leetify_data, lookup, leetify_notes = await client.resolve_match(
                 share_code=match.share_code,
                 source_match_id=match.source_match_id,
                 mode=match.mode,
@@ -273,12 +273,11 @@ async def sync_match_from_sources(db: AsyncSession, match_id: UUID) -> dict:
                 if lookup:
                     sources.append(lookup)
             else:
-                tried = "matchmaking_competitive, matchmaking, profile history"
-                if match.source == "faceit":
-                    tried = "faceit, profile history"
+                detail = "; ".join(leetify_notes) if leetify_notes else "no data returned"
                 errors.append(
-                    f"Leetify has no data for this match (404). "
-                    f"Tried {tried}. Share codes only work if Leetify has analyzed the match."
+                    "Leetify has no data for this match. "
+                    f"Tried profile history, game id, and share-code lookups ({detail}). "
+                    "The match must exist on Leetify (account linked + demo analyzed)."
                 )
         except Exception as exc:
             errors.append(f"Leetify: {exc}")

@@ -18,6 +18,7 @@ from app.models import (
     SyncJob,
 )
 from app.schemas import MatchIngestIn, MatchPlayerIn
+from app.services.steam_client import SteamClient
 
 
 STEAM64_RE = re.compile(r"^\d{17}$")
@@ -94,7 +95,29 @@ async def upsert_player(
     return player
 
 
-async def ingest_match(db: AsyncSession, data: MatchIngestIn) -> tuple[Match, bool]:
+async def fetch_steam_persona_names(db: AsyncSession, steam64_ids: list[str]) -> dict[str, str]:
+    api_key = await get_setting(db, "steam_api_key") or settings.steam_api_key
+    if not api_key or not steam64_ids:
+        return {}
+
+    client = SteamClient(api_key)
+    names: dict[str, str] = {}
+    unique_ids = list(dict.fromkeys(steam64_ids))
+    for i in range(0, len(unique_ids), 100):
+        batch = unique_ids[i : i + 100]
+        for player in await client.get_player_summaries(batch):
+            steam64 = player.get("steamid")
+            persona = player.get("personaname")
+            if steam64 and persona:
+                names[str(steam64)] = str(persona)
+    return names
+
+
+async def ingest_match(
+    db: AsyncSession,
+    data: MatchIngestIn,
+    steam_names: dict[str, str] | None = None,
+) -> tuple[Match, bool]:
     existing = await db.execute(
         select(Match).where(
             Match.source == data.source,
@@ -120,6 +143,18 @@ async def ingest_match(db: AsyncSession, data: MatchIngestIn) -> tuple[Match, bo
         db.add(match)
         await db.flush()
     else:
+        if data.map:
+            match.map = data.map
+        if data.mode:
+            match.mode = data.mode
+        if data.played_at:
+            match.played_at = data.played_at
+        if data.score_team_a is not None:
+            match.score_team_a = data.score_team_a
+        if data.score_team_b is not None:
+            match.score_team_b = data.score_team_b
+        if data.duration_seconds is not None:
+            match.duration_seconds = data.duration_seconds
         if data.share_code:
             match.share_code = data.share_code
         if data.raw_payload:
@@ -128,7 +163,8 @@ async def ingest_match(db: AsyncSession, data: MatchIngestIn) -> tuple[Match, bo
     my_steam64 = await get_my_steam64_id(db)
 
     for p in data.players:
-        player = await upsert_player(db, p.steam64_id, name=p.name)
+        player_name = (steam_names or {}).get(p.steam64_id) or p.name
+        player = await upsert_player(db, p.steam64_id, name=player_name)
         is_me = p.is_me or p.steam64_id == my_steam64
 
         mp_result = await db.execute(

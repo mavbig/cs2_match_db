@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { api, formatDate, formatMap, MatchSummary } from "@/lib/api";
+import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore, MatchSummary } from "@/lib/api";
 
 export default async function MatchesPage() {
   let matches: MatchSummary[] = [];
@@ -19,6 +19,7 @@ export default async function MatchesPage() {
           <table>
             <thead>
               <tr>
+                <th>Match</th>
                 <th>Map</th>
                 <th>Mode</th>
                 <th>Score</th>
@@ -31,12 +32,11 @@ export default async function MatchesPage() {
               {matches.map((m) => (
                 <tr key={m.id}>
                   <td>
-                    <Link href={`/matches/${m.id}`}>{formatMap(m.map)}</Link>
+                    <Link href={`/matches/${m.id}`}>{formatMatchLabel(m)}</Link>
                   </td>
+                  <td>{formatMap(m.map)}</td>
                   <td>{m.mode ?? "—"}</td>
-                  <td>
-                    {m.score_team_a ?? "?"} : {m.score_team_b ?? "?"}
-                  </td>
+                  <td>{formatMatchScore(m.source, m.score_team_a, m.score_team_b)}</td>
                   <td>{m.player_count}</td>
                   <td style={{ color: "var(--muted)", fontSize: "0.85rem" }}>{formatDate(m.played_at)}</td>
                   <td>

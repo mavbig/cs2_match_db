@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { api, formatDate, formatMap } from "@/lib/api";
+import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore } from "@/lib/api";
 
 export default async function DashboardPage() {
   let data;
@@ -70,6 +70,7 @@ export default async function DashboardPage() {
             <table>
               <thead>
                 <tr>
+                  <th>Match</th>
                   <th>Map</th>
                   <th>Score</th>
                   <th>Date</th>
@@ -79,14 +80,13 @@ export default async function DashboardPage() {
                 {recent_matches.map((m) => (
                   <tr key={m.id}>
                     <td>
-                      <Link href={`/matches/${m.id}`}>{formatMap(m.map)}</Link>
+                      <Link href={`/matches/${m.id}`}>{formatMatchLabel(m)}</Link>
                       <span className="badge badge-blue" style={{ marginLeft: "0.5rem" }}>
                         {m.source}
                       </span>
                     </td>
-                    <td>
-                      {m.score_team_a ?? "?"} : {m.score_team_b ?? "?"}
-                    </td>
+                    <td>{formatMap(m.map)}</td>
+                    <td>{formatMatchScore(m.source, m.score_team_a, m.score_team_b)}</td>
                     <td style={{ color: "var(--muted)", fontSize: "0.85rem" }}>{formatDate(m.played_at)}</td>
                   </tr>
                 ))}

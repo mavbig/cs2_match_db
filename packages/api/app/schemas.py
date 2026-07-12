@@ -72,6 +72,7 @@ class MatchOut(BaseModel):
 class MatchSummaryOut(BaseModel):
     id: UUID
     source: str
+    source_match_id: str
     map: str | None
     mode: str | None
     played_at: datetime | None

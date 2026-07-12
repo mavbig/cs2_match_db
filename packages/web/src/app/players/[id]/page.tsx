@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FaceitProfile, FaceitProfileStats } from "@/components/FaceitProfile";
-import { api, formatDate, formatMap, PlayerMatch } from "@/lib/api";
+import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore, PlayerMatch } from "@/lib/api";
 
 export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -125,6 +125,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
           <table>
             <thead>
               <tr>
+                <th>Match</th>
                 <th>Map</th>
                 <th>Score</th>
                 <th>K</th>
@@ -139,11 +140,10 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
               {matches.map((m) => (
                 <tr key={m.id}>
                   <td>
-                    <Link href={`/matches/${m.id}`}>{formatMap(m.map)}</Link>
+                    <Link href={`/matches/${m.id}`}>{formatMatchLabel(m)}</Link>
                   </td>
-                  <td>
-                    {m.score_team_a ?? "?"} : {m.score_team_b ?? "?"}
-                  </td>
+                  <td>{formatMap(m.map)}</td>
+                  <td>{formatMatchScore(m.source, m.score_team_a, m.score_team_b)}</td>
                   <td>{m.kills ?? "—"}</td>
                   <td>{m.assists ?? "—"}</td>
                   <td>{m.deaths ?? "—"}</td>

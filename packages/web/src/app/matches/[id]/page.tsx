@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { api, formatDate, formatMap } from "@/lib/api";
+import { api, formatDate, formatMap, formatMatchScore } from "@/lib/api";
 
 export default async function MatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,10 +26,11 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
         <h1 style={{ fontSize: "1.75rem", fontWeight: 700, marginTop: "0.5rem" }}>
           {formatMap(match.map)}
         </h1>
-        <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", color: "var(--muted)", fontSize: "0.9rem" }}>
+        <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", color: "var(--muted)", fontSize: "0.9rem", flexWrap: "wrap" }}>
+          <span>Match #{match.source_match_id.slice(-8)}</span>
           <span>{formatDate(match.played_at)}</span>
           <span>
-            Score: {match.score_team_a ?? "?"} : {match.score_team_b ?? "?"}
+            Score: {formatMatchScore(match.source, match.score_team_a, match.score_team_b)}
           </span>
           <span className="badge">{match.source}</span>
           {match.mode && <span className="badge">{match.mode}</span>}

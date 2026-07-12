@@ -39,6 +39,7 @@ from app.services.match_service import (
     get_setting,
     get_top_teammates,
     ingest_match,
+    fetch_steam_persona_names,
     parse_steam_input,
     search_players,
     set_setting,
@@ -101,6 +102,7 @@ def _match_summary(match: Match) -> MatchSummaryOut:
     return MatchSummaryOut(
         id=match.id,
         source=match.source,
+        source_match_id=match.source_match_id,
         map=match.map,
         mode=match.mode,
         played_at=match.played_at,
@@ -119,8 +121,16 @@ async def health():
 async def ingest_matches_batch(body: MatchIngestBatchIn, db: AsyncSession = Depends(get_db)):
     created = 0
     updated = 0
+
+    steam_ids: list[str] = []
     for m in body.matches:
-        _, was_created = await ingest_match(db, m)
+        if m.source == "steam_gc":
+            steam_ids.extend(p.steam64_id for p in m.players)
+    steam_names = await fetch_steam_persona_names(db, steam_ids)
+
+    for m in body.matches:
+        names = steam_names if m.source == "steam_gc" else None
+        _, was_created = await ingest_match(db, m, steam_names=names)
         if was_created:
             created += 1
         else:

@@ -41,6 +41,7 @@ export interface Player {
 export interface MatchSummary {
   id: string;
   source: string;
+  source_match_id: string;
   map: string | null;
   mode: string | null;
   played_at: string | null;
@@ -158,4 +159,31 @@ export function formatDate(iso: string | null): string {
 export function formatMap(map: string | null): string {
   if (!map) return "Unknown";
   return map.replace(/^de_/, "").replace(/_/g, " ");
+}
+
+export function formatMatchLabel(match: Pick<MatchSummary, "source_match_id" | "id" | "played_at">): string {
+  if (match.source_match_id) {
+    return `#${match.source_match_id.slice(-8)}`;
+  }
+  if (match.played_at) {
+    return new Date(match.played_at).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+  return match.id.slice(0, 8);
+}
+
+export function formatMatchScore(
+  source: string,
+  scoreA: number | null,
+  scoreB: number | null
+): string {
+  if (scoreA == null || scoreB == null) return "? : ?";
+  if (source === "steam_gc" && scoreA <= 1 && scoreB <= 1 && scoreA + scoreB === 1) {
+    return scoreA > scoreB ? "Win" : "Loss";
+  }
+  return `${scoreA} : ${scoreB}`;
 }

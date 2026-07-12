@@ -39,6 +39,40 @@ export function getRefreshToken(mafile: MaFile | null): string | undefined {
   return mafile?.Session?.RefreshToken?.trim() || undefined;
 }
 
+/** Decode JWT payload without verification (audience check only). */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function getRefreshTokenAudiences(token: string): string[] {
+  const payload = decodeJwtPayload(token);
+  if (!payload) return [];
+  const aud = payload.aud;
+  if (Array.isArray(aud)) return aud.map(String);
+  if (typeof aud === "string") return [aud];
+  return [];
+}
+
+/** steam-user GC login requires a client-scoped refresh token (not web/mobile-only). */
+export function isClientRefreshToken(token: string): boolean {
+  return getRefreshTokenAudiences(token).includes("client");
+}
+
+export function getClientRefreshToken(mafile: MaFile | null): string | undefined {
+  const token = getRefreshToken(mafile);
+  if (!token) return undefined;
+  if (isClientRefreshToken(token)) return token;
+  return undefined;
+}
+
 export function getAccountName(mafile: MaFile | null, fallback: string): string {
   return (process.env.STEAM_BOT_USERNAME?.trim() || mafile?.account_name?.trim() || fallback).trim();
 }

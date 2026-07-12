@@ -1,6 +1,6 @@
 import { completeJob, fetchSyncConfig, postMatches, startJob } from "./api-poster.js";
 import { GcClient } from "./gc-client.js";
-import { getAccountName, getRefreshToken, getSharedSecret, isThrottleError, loadMaFile, throttleBackoffMs } from "./mafile.js";
+import { getAccountName, getClientRefreshToken, getSharedSecret, getRefreshToken, isClientRefreshToken, isThrottleError, loadMaFile, throttleBackoffMs } from "./mafile.js";
 
 const POLL_INTERVAL = Number(process.env.SYNC_POLL_INTERVAL ?? 300) * 1000;
 
@@ -29,17 +29,17 @@ async function ensureGcConnected(): Promise<GcClient> {
 
   const mafile = loadMaFile();
   const username = getAccountName(mafile, BOT_USERNAME);
-  const refreshToken = getRefreshToken(mafile);
   const sharedSecret = getSharedSecret(mafile) ?? BOT_SHARED_SECRET.trim();
+  const hasClientToken = Boolean(getClientRefreshToken(mafile));
 
   if (!username) {
     throw new Error("Set STEAM_BOT_USERNAME or use a maFile with account_name");
   }
 
-  if (!refreshToken && (!BOT_PASSWORD || !sharedSecret)) {
+  if (!hasClientToken && (!BOT_PASSWORD || !sharedSecret)) {
     throw new Error(
-      "Set STEAM_BOT_MAFILE_PATH (recommended, uses Session.RefreshToken), " +
-        "or STEAM_BOT_PASSWORD + STEAM_BOT_SHARED_SECRET"
+      "Steam GC login requires STEAM_BOT_PASSWORD + shared_secret from maFile " +
+        "(web/mobile-only RefreshToken cannot connect to the Game Coordinator)"
     );
   }
 
@@ -136,8 +136,11 @@ async function main(): Promise<void> {
   console.log(`[steam-sync] Poll interval: ${POLL_INTERVAL / 1000}s`);
 
   const mafile = loadMaFile();
-  if (mafile?.Session?.RefreshToken) {
-    console.log("[steam-sync] maFile detected with RefreshToken — will use token login");
+  const refreshToken = getRefreshToken(mafile);
+  if (refreshToken && isClientRefreshToken(refreshToken)) {
+    console.log("[steam-sync] maFile has client RefreshToken — will try token login first");
+  } else if (mafile?.shared_secret) {
+    console.log("[steam-sync] maFile has shared_secret — will use password + auto-TOTP login");
   }
 
   let fullSyncDone = false;
@@ -163,6 +166,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("[steam-sync] Fatal error:", err);
-  process.exit(1);
+  console.error("[steam-sync] Fatal startup error:", err);
+  // Keep process alive — sync loop handles retries.
 });

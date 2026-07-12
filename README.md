@@ -198,7 +198,19 @@ The service auto-generates fresh TOTP codes every login using this secret — sa
 
 #### Option B — Mount the full `.maFile` (recommended)
 
-Modern SDA / steamguard-cli maFiles include `Session.RefreshToken` — the app uses this first (no TOTP code each login).
+Modern SDA / steamguard-cli maFiles include `Session.RefreshToken`, but tokens from the **mobile app** often have audiences `web, mobile` only — those **cannot** connect to the Game Coordinator. For GC sync you need:
+
+- **`shared_secret`** from the maFile + **`STEAM_BOT_PASSWORD`** in `.env` (auto-generates TOTP codes), **or**
+- A **client-scoped** RefreshToken (from Steam Desktop Authenticator on Windows after a full client login)
+
+If you see `RefreshToken audiences [web, mobile, ...] — using password + TOTP`, that is expected. Ensure `.env` has:
+
+```env
+STEAM_BOT_USERNAME=mav_small
+STEAM_BOT_PASSWORD=your_bot_password
+```
+
+The maFile mounted at `secrets/maFile.json` supplies `shared_secret` automatically — you do not need a separate `STEAM_BOT_SHARED_SECRET` if the maFile is present.
 
 1. Copy your bot's maFile to the server (never commit to git):
    ```bash

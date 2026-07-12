@@ -7,7 +7,9 @@ import { EventEmitter } from "events";
 
 import {
   getAccountName,
+  getClientRefreshToken,
   getRefreshToken,
+  getRefreshTokenAudiences,
   getSharedSecret,
   loadMaFile,
 } from "./mafile.js";
@@ -69,16 +71,24 @@ export class GcClient extends EventEmitter {
 
   async login(username: string, password: string, sharedSecret?: string): Promise<void> {
     const mafile = loadMaFile();
-    const refreshToken = getRefreshToken(mafile);
+    const rawRefresh = getRefreshToken(mafile);
+    const refreshToken = getClientRefreshToken(mafile);
     const accountName = getAccountName(mafile, username);
+
+    if (rawRefresh && !refreshToken) {
+      const aud = getRefreshTokenAudiences(rawRefresh);
+      console.log(
+        `[steam-sync] RefreshToken audiences [${aud.join(", ")}] — web/mobile only; using password + TOTP`
+      );
+    }
 
     if (refreshToken) {
       try {
-        await this.logOn({ refreshToken }, accountName, "refresh token from maFile");
+        await this.logOn({ refreshToken }, accountName, "client refresh token");
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[steam-sync] Refresh token login failed (${msg}), trying password + TOTP...`);
+        console.warn(`[steam-sync] Client refresh token login failed (${msg}), trying password + TOTP...`);
       }
     }
 
@@ -155,7 +165,12 @@ export class GcClient extends EventEmitter {
       this.user.once("sentry", onSentry);
 
       console.log(`[steam-sync] Logging in bot account (${method})...`);
-      this.user.logOn(logOnOptions);
+      try {
+        this.user.logOn(logOnOptions);
+      } catch (err) {
+        cleanup();
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 

@@ -22,22 +22,32 @@ from app.services.enrichment import get_match_sync_status, touch_enrichment
 logger = logging.getLogger(__name__)
 
 
+def normalize_demo_url(url: str) -> str:
+    """Valve replay servers serve compressed demos (.dem.bz2), not raw .dem files."""
+    cleaned = url.strip()
+    if cleaned.endswith(".dem.bz2"):
+        return cleaned
+    if cleaned.endswith(".dem"):
+        return f"{cleaned}.bz2"
+    return cleaned
+
+
 def extract_demo_url_from_gc(raw: dict | None) -> str | None:
     if not raw:
         return None
     enrichment = raw.get("_enrichment") or {}
     if enrichment.get("replay_url"):
-        return str(enrichment["replay_url"])
+        return normalize_demo_url(str(enrichment["replay_url"]))
 
     leetify = enrichment.get("leetify") or {}
     replay = leetify.get("replay_url") or leetify.get("replayUrl")
     if replay:
-        return str(replay)
+        return normalize_demo_url(str(replay))
 
     for entry in reversed(raw.get("roundstatsall") or []):
         map_field = entry.get("map")
         if isinstance(map_field, str) and map_field.startswith("http") and ".dem" in map_field:
-            return map_field.replace(".bz2", "") if map_field.endswith(".bz2") else map_field
+            return normalize_demo_url(map_field)
     return None
 
 

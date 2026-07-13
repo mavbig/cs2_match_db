@@ -84,9 +84,9 @@ export function FaceitActivityTimeline({ activity }: { activity: FaceitActivity 
                     className="faceit-activity-bar-fill"
                     style={{ height: `${month.height_pct ?? (month.count > 0 ? 20 : 0)}%` }}
                   />
+                  {month.count > 0 && <span className="faceit-activity-bar-count">{month.count}</span>}
                 </div>
                 <span className="faceit-activity-bar-label">{month.label}</span>
-                {month.count > 0 && <span className="faceit-activity-bar-count">{month.count}</span>}
               </div>
             ))}
           </div>

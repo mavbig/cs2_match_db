@@ -1,5 +1,5 @@
 import { FaceitActivity, FaceitActivityTimeline } from "@/components/FaceitActivityTimeline";
-import { countryFlag, countryLabel } from "@/lib/country";
+import { CountryBadge } from "@/components/CountryFlag";
 
 export interface FaceitStatBlock {
   matches?: number | null;
@@ -139,11 +139,7 @@ export function FaceitProfile({ faceit }: { faceit: FaceitProfileStats }) {
             {faceit.skill_level != null && <span className="badge badge-blue">Lvl {faceit.skill_level}</span>}
             {faceit.elo != null && <span className="badge">{faceit.elo} ELO</span>}
             {faceit.verified && <span className="badge badge-green">Verified</span>}
-            {faceit.country && (
-              <span className="badge" title={countryLabel(faceit.country)}>
-                {countryFlag(faceit.country)} {countryLabel(faceit.country)}
-              </span>
-            )}
+            {faceit.country && <CountryBadge code={faceit.country} />}
           </div>
         </div>
       </div>

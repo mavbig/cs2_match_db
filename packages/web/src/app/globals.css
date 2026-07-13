@@ -327,6 +327,22 @@ a:hover {
   font-size: 0.85rem;
 }
 
+.match-external-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.match-external-links .profile-link {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.match-external-links .profile-link-label {
+  font-size: 0.78rem;
+}
+
 .faceit-activity {
   display: flex;
   flex-direction: column;

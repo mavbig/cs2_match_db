@@ -42,3 +42,32 @@ def get_match_sync_status(raw: dict | None, source: str) -> dict:
         "leetify_synced": leetify_synced,
         "leetify_synced_at": leetify_at,
     }
+
+
+def get_match_external_urls(match) -> dict[str, str | None]:
+    """Build Leetify / FACEIT web URLs from stored match identity and enrichment."""
+    enrichment = (match.raw_payload or {}).get("_enrichment") or {}
+    leetify_data = enrichment.get("leetify") or {}
+
+    leetify_game_id = enrichment.get("leetify_game_id") or leetify_data.get("id")
+    if match.source == "leetify" and not leetify_game_id:
+        leetify_game_id = match.source_match_id
+
+    leetify_url = (
+        f"https://leetify.com/app/match-details/{leetify_game_id}" if leetify_game_id else None
+    )
+
+    faceit_match_id: str | None = None
+    if match.source == "faceit":
+        faceit_match_id = match.source_match_id
+    else:
+        data_source = str(leetify_data.get("data_source") or "").lower()
+        ds_id = leetify_data.get("data_source_match_id")
+        if data_source == "faceit" and ds_id:
+            faceit_match_id = str(ds_id)
+
+    faceit_url = (
+        f"https://www.faceit.com/en/cs2/room/{faceit_match_id}/scoreboard" if faceit_match_id else None
+    )
+
+    return {"leetify_url": leetify_url, "faceit_url": faceit_url}

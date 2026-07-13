@@ -80,6 +80,8 @@ class MatchOut(BaseModel):
     share_code: str | None
     demo_url: str | None = None
     sync_status: MatchSyncStatusOut = Field(default_factory=MatchSyncStatusOut)
+    leetify_url: str | None = None
+    faceit_url: str | None = None
     players: list[MatchPlayerOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

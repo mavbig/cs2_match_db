@@ -107,6 +107,8 @@ export interface MatchDetail extends MatchSummary {
   duration_seconds: number | null;
   share_code: string | null;
   demo_url: string | null;
+  leetify_url: string | null;
+  faceit_url: string | null;
   sync_status: MatchSyncStatus;
   players: MatchPlayer[];
 }

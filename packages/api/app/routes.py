@@ -49,7 +49,7 @@ from app.services.match_service import (
     set_setting,
     upsert_player,
 )
-from app.services.enrichment import get_match_sync_status
+from app.services.enrichment import get_match_external_urls, get_match_sync_status
 from app.services.leetify_sync import extract_demo_url_from_gc, import_leetify_profile, sync_match_from_sources
 from app.services.player_enrichment import enrich_player_profile
 from app.services.secret_store import get_leetify_session_token, save_leetify_session_token
@@ -132,6 +132,7 @@ def _match_to_out(match: Match) -> MatchOut:
         share_code=match.share_code,
         demo_url=extract_demo_url_from_gc(match.raw_payload),
         sync_status=MatchSyncStatusOut(**get_match_sync_status(match.raw_payload, match.source)),
+        **get_match_external_urls(match),
         players=players,
     )
 

@@ -136,6 +136,11 @@ class PlayedWithOut(BaseModel):
     shared_matches: list[MatchSummaryOut] = Field(default_factory=list)
 
 
+class TeammatesListOut(BaseModel):
+    teammates: list[PlayedWithOut] = Field(default_factory=list)
+    has_more: bool = False
+
+
 class SearchResultOut(BaseModel):
     players: list[PlayerOut] = Field(default_factory=list)
 
@@ -196,4 +201,5 @@ class PlayerLookupIn(BaseModel):
 class DashboardOut(BaseModel):
     recent_matches: list[MatchSummaryOut] = Field(default_factory=list)
     top_teammates: list[PlayedWithOut] = Field(default_factory=list)
+    top_teammates_has_more: bool = False
     sync_status: SyncStatusOut

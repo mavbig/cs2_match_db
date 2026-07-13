@@ -338,7 +338,7 @@ async def get_played_with_stats(db: AsyncSession, target_steam64: str) -> dict |
     }
 
 
-async def get_top_teammates(db: AsyncSession, limit: int = 10) -> list[dict]:
+async def get_top_teammates(db: AsyncSession, limit: int = 10, offset: int = 0) -> list[dict]:
     my_steam64 = await get_my_steam64_id(db)
     if not my_steam64:
         return []
@@ -367,6 +367,7 @@ async def get_top_teammates(db: AsyncSession, limit: int = 10) -> list[dict]:
         )
         .group_by(Player.id)
         .order_by(func.count(func.distinct(MatchPlayer.match_id)).desc())
+        .offset(offset)
         .limit(limit)
     )
     rows = (await db.execute(stmt)).all()

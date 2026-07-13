@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { MatchSourceBadge } from "@/components/MatchSourceBadge";
+import { TopTeammatesPanel } from "@/components/TopTeammatesPanel";
 import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore } from "@/lib/api";
 
 export default async function DashboardPage() {
@@ -20,7 +21,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const { recent_matches, top_teammates, sync_status } = data;
+  const { recent_matches, top_teammates, top_teammates_has_more, sync_status } = data;
 
   return (
     <div>
@@ -98,36 +99,7 @@ export default async function DashboardPage() {
 
         <div className="card">
           <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Most Played With</h2>
-          {top_teammates.length === 0 ? (
-            <p style={{ color: "var(--muted)" }}>No co-play data yet.</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Player</th>
-                  <th>Times</th>
-                  <th>Last</th>
-                </tr>
-              </thead>
-              <tbody>
-                {top_teammates.map((t) => (
-                  <tr key={t.player.id}>
-                    <td>
-                      <Link href={`/players/${t.player.id}`}>
-                        {t.player.current_name ?? t.player.steam64_id}
-                      </Link>
-                    </td>
-                    <td>
-                      <span className="badge badge-green">{t.times_together}</span>
-                    </td>
-                    <td style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
-                      {formatDate(t.last_together)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <TopTeammatesPanel initialTeammates={top_teammates} initialHasMore={top_teammates_has_more} />
         </div>
       </div>
     </div>

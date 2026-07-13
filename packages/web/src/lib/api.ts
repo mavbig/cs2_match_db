@@ -157,7 +157,13 @@ export interface SyncStatus {
 export interface Dashboard {
   recent_matches: MatchSummary[];
   top_teammates: PlayedWith[];
+  top_teammates_has_more: boolean;
   sync_status: SyncStatus;
+}
+
+export interface TeammatesPage {
+  teammates: PlayedWith[];
+  has_more: boolean;
 }
 
 export interface SyncJob {
@@ -185,6 +191,8 @@ export interface Settings {
 export const api = {
   health: () => fetchApi<{ status: string }>("/api/v1/health"),
   dashboard: () => fetchApi<Dashboard>("/api/v1/dashboard"),
+  teammates: (limit = 10, offset = 0) =>
+    fetchApi<TeammatesPage>(`/api/v1/teammates?limit=${limit}&offset=${offset}`),
   matches: (limit = 20, offset = 0) => fetchApi<MatchSummary[]>(`/api/v1/matches?limit=${limit}&offset=${offset}`),
   matchCount: () => fetchApi<MatchCount>("/api/v1/matches/count"),
   match: (id: string) => fetchApi<MatchDetail>(`/api/v1/matches/${id}`),

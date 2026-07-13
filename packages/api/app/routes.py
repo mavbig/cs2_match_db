@@ -31,6 +31,7 @@ from app.schemas import (
     SyncJobOut,
     SyncStatusOut,
     MatchSyncStatusOut,
+    TeammatesListOut,
 )
 from app.services.match_service import (
     create_sync_job,
@@ -76,6 +77,26 @@ def _steam_profile_url(steam64_id: str, stored: str | None = None) -> str:
     if stored and stored.startswith("http"):
         return stored
     return f"https://steamcommunity.com/profiles/{steam64_id}"
+
+
+def _teammates_to_out(rows: list[dict]) -> list[PlayedWithOut]:
+    teammates = []
+    for t in rows:
+        teammates.append(
+            PlayedWithOut(
+                player=PlayerOut.model_validate(t["player"]),
+                times_together=t["times_together"],
+                first_together=None,
+                last_together=t["last_together"],
+            )
+        )
+    return teammates
+
+
+async def _fetch_teammates_page(db: AsyncSession, limit: int, offset: int) -> TeammatesListOut:
+    rows = await get_top_teammates(db, limit + 1, offset)
+    has_more = len(rows) > limit
+    return TeammatesListOut(teammates=_teammates_to_out(rows[:limit]), has_more=has_more)
 
 
 def _match_to_out(match: Match) -> MatchOut:
@@ -539,7 +560,7 @@ async def dashboard(db: AsyncSession = Depends(get_db)):
     recent = await db.execute(
         select(Match).options(selectinload(Match.players)).order_by(Match.played_at.desc().nullslast()).limit(10)
     )
-    top = await get_top_teammates(db, 5)
+    teammates_page = await _fetch_teammates_page(db, limit=10, offset=0)
 
     total_matches = (await db.execute(select(func.count()).select_from(Match))).scalar() or 0
     total_players = (await db.execute(select(func.count()).select_from(Player))).scalar() or 0
@@ -578,22 +599,23 @@ async def dashboard(db: AsyncSession = Depends(get_db)):
         faceit_configured=bool(faceit_key or settings.faceit_api_key),
     )
 
-    teammates = []
-    for t in top:
-        teammates.append(
-            PlayedWithOut(
-                player=PlayerOut.model_validate(t["player"]),
-                times_together=t["times_together"],
-                first_together=None,
-                last_together=t["last_together"],
-            )
-        )
+    teammates = teammates_page.teammates
 
     return DashboardOut(
         recent_matches=[_match_summary(m) for m in recent.scalars().all()],
         top_teammates=teammates,
+        top_teammates_has_more=teammates_page.has_more,
         sync_status=sync_status,
     )
+
+
+@router.get("/teammates", response_model=TeammatesListOut)
+async def list_teammates(
+    limit: int = Query(10, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _fetch_teammates_page(db, limit=limit, offset=offset)
 
 
 @router.get("/settings", response_model=SettingsOut)

@@ -51,11 +51,13 @@ function ratingLabel(key: string): string {
 export function LeetifyProfile({ leetify }: { leetify: LeetifyProfileStats }) {
   const rating = leetify.rating ?? {};
   const ranks = leetify.ranks ?? {};
-  const ratingEntries = RATING_ORDER.filter((key) => rating[key] != null).map((key) => [
+  const ratingEntries: [string, number][] = RATING_ORDER.filter((key) => rating[key] != null).map((key) => [
     key,
-    rating[key] as number,
+    rating[key],
   ]);
-  const extraRatingEntries = Object.entries(rating).filter(([key]) => !RATING_ORDER.includes(key));
+  const extraRatingEntries = Object.entries(rating).filter(
+    ([key]) => !RATING_ORDER.includes(key),
+  ) as [string, number][];
 
   return (
     <div className="card" style={{ marginBottom: "1.5rem" }}>

@@ -459,7 +459,14 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.faceit-profile-identity {
   flex-wrap: wrap;
+}
+
+.faceit-profile-tags {
+  flex-wrap: nowrap;
 }
 
 .faceit-profile-name {

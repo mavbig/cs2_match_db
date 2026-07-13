@@ -17,6 +17,36 @@ MATCHMAKING_DATA_SOURCES = (
     "renown",
 )
 
+HISTORY_PAGE_CAP = 120
+
+
+def _day_start(dt: datetime) -> datetime:
+    dt = dt.astimezone(timezone.utc)
+    return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _day_end(dt: datetime) -> datetime:
+    dt = dt.astimezone(timezone.utc)
+    return dt.replace(hour=23, minute=59, second=59, microsecond=999000)
+
+
+def _format_period_start(dt: datetime) -> str:
+    return _day_start(dt).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _format_period_end(dt: datetime) -> str:
+    return _day_end(dt).strftime("%Y-%m-%dT%H:%M:%S.999Z")
+
+
+def _parse_finished_at(game: dict) -> datetime | None:
+    finished = game.get("finished_at") or game.get("finishedAt")
+    if not finished:
+        return None
+    try:
+        return datetime.fromisoformat(str(finished).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
 
 class LeetifyClient:
     PUBLIC_BASE = "https://api-public.cs-prod.leetify.com"
@@ -149,11 +179,21 @@ class LeetifyClient:
 
         return self._parse_matches_response(data)
 
-    async def get_games_history(self, start: datetime, end: datetime) -> tuple[list[dict] | None, int | None]:
+    async def get_games_history(
+        self,
+        current_start: datetime,
+        current_end: datetime,
+        previous_start: datetime,
+        previous_end: datetime,
+    ) -> tuple[list[dict] | None, int | None]:
         filters = {
             "currentPeriod": {
-                "start": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                "end": end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.999Z"),
+                "start": _format_period_start(current_start),
+                "end": _format_period_end(current_end),
+            },
+            "previousPeriod": {
+                "start": _format_period_start(previous_start),
+                "end": _format_period_end(previous_end),
             },
             "isPeriodSetManually": True,
         }
@@ -178,37 +218,79 @@ class LeetifyClient:
             return None, status
         return self._parse_matches_response(data), None
 
+    def _shift_history_windows_back(
+        self,
+        current_start: datetime,
+        window_days: int,
+    ) -> tuple[datetime, datetime, datetime, datetime]:
+        previous_end = _day_end(current_start - timedelta(days=1))
+        previous_start = _day_start(previous_end - timedelta(days=window_days))
+        current_end = previous_end
+        current_start = previous_start
+        return current_start, current_end, previous_start, previous_end
+
     async def get_all_games_history(
         self,
         *,
-        months_back: int | None = None,
+        earliest: datetime | None = None,
     ) -> tuple[list[dict], dict]:
-        months_back = months_back or settings.leetify_history_months
+        window_days = settings.leetify_history_window_days
+        max_requests = settings.leetify_history_max_requests
+        years_back = max(1, settings.leetify_history_months // 12)
+        default_earliest = _day_start(datetime.now(timezone.utc) - timedelta(days=365 * years_back))
+        earliest_bound = _day_start(earliest) if earliest else default_earliest
+
         collected: list[dict] = []
         seen_ids: set[str] = set()
-        now = datetime.now(timezone.utc)
         history_auth_failed = False
+        requests = 0
+        stagnant_windows = 0
 
-        for month_index in range(months_back):
-            period_end = now - timedelta(days=30 * month_index)
-            period_start = period_end - timedelta(days=30)
-            page, status = await self.get_games_history(period_start, period_end)
+        now = datetime.now(timezone.utc)
+        current_end = _day_end(now)
+        current_start = _day_start(current_end - timedelta(days=window_days))
+        previous_end = _day_end(current_start - timedelta(days=1))
+        previous_start = _day_start(previous_end - timedelta(days=window_days))
+
+        while requests < max_requests and current_end >= earliest_bound:
+            page, status = await self.get_games_history(
+                current_start,
+                current_end,
+                previous_start,
+                previous_end,
+            )
+            requests += 1
+
             if page is None:
                 if status in (401, 403):
                     history_auth_failed = True
                 if not collected:
                     return [], {
                         "history_available": False,
-                        "history_windows": month_index + 1,
+                        "history_windows": requests,
                         "history_auth_required": not bool(self.session_token) or history_auth_failed,
                         "history_auth_failed": history_auth_failed,
                     }
                 break
+
             if not page:
+                stagnant_windows += 1
+                if stagnant_windows >= 3:
+                    break
+                current_start, current_end, previous_start, previous_end = self._shift_history_windows_back(
+                    current_start,
+                    window_days,
+                )
                 continue
 
+            stagnant_windows = 0
             added = 0
+            oldest_in_page: datetime | None = None
             for game in page:
+                finished = _parse_finished_at(game)
+                if finished and (oldest_in_page is None or finished < oldest_in_page):
+                    oldest_in_page = finished
+
                 game_id = str(game.get("id") or "")
                 if game_id and game_id in seen_ids:
                     continue
@@ -218,33 +300,67 @@ class LeetifyClient:
                 added += 1
 
             logger.info(
-                "Leetify games/history month -%d: page=%d added=%d total=%d",
-                month_index,
+                "Leetify games/history %s..%s / prev %s..%s: page=%d added=%d total=%d",
+                current_start.date(),
+                current_end.date(),
+                previous_start.date(),
+                previous_end.date(),
                 len(page),
                 added,
                 len(collected),
             )
 
+            if len(page) >= HISTORY_PAGE_CAP and oldest_in_page and oldest_in_page > earliest_bound:
+                # API caps at 120 games — walk further back inside this window.
+                current_end = _day_end(oldest_in_page - timedelta(seconds=1))
+                if current_end < current_start:
+                    current_start, current_end, previous_start, previous_end = self._shift_history_windows_back(
+                        current_start,
+                        window_days,
+                    )
+                continue
+
+            if added == 0:
+                current_start, current_end, previous_start, previous_end = self._shift_history_windows_back(
+                    current_start,
+                    window_days,
+                )
+                continue
+
+            current_start, current_end, previous_start, previous_end = self._shift_history_windows_back(
+                current_start,
+                window_days,
+            )
+
         if not collected:
             return [], {
                 "history_available": bool(self.session_token) and not history_auth_failed,
-                "history_windows": months_back,
+                "history_windows": requests,
                 "history_auth_required": not bool(self.session_token) or history_auth_failed,
                 "history_auth_failed": history_auth_failed,
             }
 
         return collected, {
             "history_available": True,
-            "history_windows": months_back,
+            "history_windows": requests,
             "fetched": len(collected),
             "import_source": "games_history",
         }
 
     async def get_all_profile_matches(self, steam64_id: str) -> tuple[list[dict], dict]:
-        history_games, history_meta = await self.get_all_games_history()
+        profile = await self.get_profile(steam64_id)
+        total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
+        earliest = None
+        if profile and profile.get("first_match_date"):
+            try:
+                earliest = datetime.fromisoformat(
+                    str(profile["first_match_date"]).replace("Z", "+00:00")
+                ).astimezone(timezone.utc)
+            except ValueError:
+                earliest = None
+
+        history_games, history_meta = await self.get_all_games_history(earliest=earliest)
         if history_games:
-            profile = await self.get_profile(steam64_id)
-            total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
             meta = {
                 "profile_total_matches": total_on_profile,
                 "leetify_user_id": str(profile.get("id")) if profile and profile.get("id") else None,
@@ -253,13 +369,11 @@ class LeetifyClient:
             if total_on_profile and len(history_games) < total_on_profile:
                 meta["api_limit_note"] = (
                     f"Fetched {len(history_games)} of {total_on_profile} Leetify games "
-                    f"via {history_meta.get('history_windows', '?')} monthly history requests."
+                    f"via {history_meta.get('history_windows', '?')} history requests."
                 )
             return history_games, meta
 
         if history_meta.get("history_auth_required"):
-            profile = await self.get_profile(steam64_id)
-            total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
             error_note = (
                 "Session token was rejected — copy a fresh Authorization header from leetify.com."
                 if history_meta.get("history_auth_failed")
@@ -272,9 +386,6 @@ class LeetifyClient:
                 "import_source": "none",
                 "api_limit_note": error_note,
             }
-
-        profile = await self.get_profile(steam64_id)
-        total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
 
         page = await self.get_profile_matches(steam64_id, limit=100, offset=0)
         collected = page or []

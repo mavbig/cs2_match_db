@@ -12,8 +12,13 @@ class Settings(BaseSettings):
     faceit_nickname: str = ""
     leetify_api_key: str = ""
     leetify_session_token: str = ""
+    # Host paths mounted in Docker for persistent secrets (see docker-compose.yml).
+    leetify_session_token_file: str = "/run/secrets/leetify_session_token"
+    secrets_env_file: str = "/config/.env"
     leetify_request_delay_ms: int = 500
-    leetify_history_months: int = 36
+    leetify_history_window_days: int = 180
+    leetify_history_max_requests: int = 50
+    leetify_history_months: int = 36  # legacy alias: used as years-back cap (months / 12)
     steam_auth_code: str = ""
     steam_oldest_share_code: str = ""
 

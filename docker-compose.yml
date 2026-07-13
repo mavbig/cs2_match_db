@@ -42,6 +42,8 @@ services:
     volumes:
       - ./packages/api:/app
       - ./migrations:/migrations
+      - ./.env:/config/.env
+      - ./secrets:/run/secrets
 
   worker:
     build:

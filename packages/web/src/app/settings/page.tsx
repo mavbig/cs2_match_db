@@ -282,9 +282,11 @@ export default function SettingsPage() {
               onChange={(e) => setForm({ ...form, leetify_session_token: e.target.value })}
             />
             <p style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: "0.35rem", lineHeight: 1.5 }}>
-              Required for full history (~36 monthly API calls). On leetify.com: DevTools → Network → a{" "}
-              <code>games/history</code> request → Request Headers → copy the full <code>Authorization</code>{" "}
-              value (starts with <code>Bearer eyJ...</code>). Paste the whole string.
+              Required for full history. Paste once and click Save — it is stored in the database,{" "}
+              <code>secrets/leetify_session_token</code>, and <code>LEETIFY_SESSION_TOKEN</code> in your{" "}
+              <code>.env</code> (survives restarts). Or set <code>LEETIFY_SESSION_TOKEN=Bearer eyJ...</code> in{" "}
+              <code>.env</code> manually. From leetify.com DevTools → Network → <code>games/history</code> → copy the
+              full <code>Authorization</code> header.
             </p>
           </label>
         </div>
@@ -314,7 +316,7 @@ export default function SettingsPage() {
           </button>
         </div>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
-          Leetify import fetches ~36 months of history (one API call per month), stores match metadata and your stats.
+          Leetify import walks your full history in ~6-month windows (like the website), stores match metadata and your stats.
           Use &quot;Enrich existing matches&quot; separately for full scoreboards and player names. Requires session
           token + API key.
         </p>

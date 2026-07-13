@@ -49,6 +49,7 @@ from app.services.match_service import (
 )
 from app.services.enrichment import get_match_sync_status
 from app.services.leetify_sync import extract_demo_url_from_gc, import_leetify_profile, sync_match_from_sources
+from app.services.secret_store import get_leetify_session_token, save_leetify_session_token
 from app.services.steam_client import SteamClient
 
 router = APIRouter(prefix="/api/v1", tags=["api"])
@@ -506,7 +507,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
     faceit_key = await get_setting(db, "faceit_api_key") or settings.faceit_api_key
     faceit_nick = await get_setting(db, "faceit_nickname") or settings.faceit_nickname
     leetify_key = await get_setting(db, "leetify_api_key") or settings.leetify_api_key
-    leetify_session = await get_setting(db, "leetify_session_token") or settings.leetify_session_token
+    leetify_session = await get_leetify_session_token(db)
     my_id = await get_my_steam64_id(db)
 
     onboarding = bool(my_id and auth and share)
@@ -540,7 +541,7 @@ async def update_settings(body: SettingsUpdateIn, db: AsyncSession = Depends(get
     if body.leetify_api_key is not None:
         await set_setting(db, "leetify_api_key", body.leetify_api_key)
     if body.leetify_session_token is not None:
-        await set_setting(db, "leetify_session_token", body.leetify_session_token)
+        await save_leetify_session_token(db, body.leetify_session_token)
     return await get_settings(db)
 
 
@@ -576,7 +577,7 @@ async def import_leetify(db: AsyncSession = Depends(get_db)):
     if not my_steam64:
         raise HTTPException(status_code=400, detail="Configure your Steam64 ID in settings first")
     leetify_key = await get_setting(db, "leetify_api_key") or settings.leetify_api_key
-    leetify_session = await get_setting(db, "leetify_session_token") or settings.leetify_session_token
+    leetify_session = await get_leetify_session_token(db)
     if not leetify_key:
         raise HTTPException(status_code=400, detail="Leetify API key not configured")
 

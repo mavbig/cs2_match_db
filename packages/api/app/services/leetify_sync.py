@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -488,7 +488,24 @@ async def find_match_for_leetify(db: AsyncSession, leetify_data: dict) -> Match 
         .where(or_(*conditions))
         .limit(1)
     )
-    return result.scalar_one_or_none()
+    match = result.scalar_one_or_none()
+    if match:
+        return match
+
+    finished_at = _parse_leetify_datetime(leetify_data.get("finished_at") or leetify_data.get("finishedAt"))
+    map_name = leetify_data.get("map_name") or leetify_data.get("mapName")
+    if finished_at and map_name:
+        result = await db.execute(
+            select(Match)
+            .options(selectinload(Match.players).selectinload(MatchPlayer.player))
+            .where(Match.played_at >= finished_at - timedelta(minutes=3))
+            .where(Match.played_at <= finished_at + timedelta(minutes=3))
+            .where(Match.map == str(map_name).lower())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    return None
 
 
 async def create_match_from_leetify(

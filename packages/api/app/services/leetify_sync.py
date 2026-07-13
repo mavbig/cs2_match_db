@@ -180,7 +180,75 @@ def _map_leetify_scores(
     return scores_by_team.get(team_numbers[0]), scores_by_team.get(team_numbers[1])
 
 
+def _normalize_player_stat(stat: dict) -> dict:
+    return {
+        "steam64_id": stat.get("steam64_id") or stat.get("steam64Id") or stat.get("steamId"),
+        "name": stat.get("name"),
+        "total_kills": stat.get("total_kills") or stat.get("totalKills") or stat.get("kills"),
+        "total_deaths": stat.get("total_deaths") or stat.get("totalDeaths") or stat.get("deaths"),
+        "total_assists": stat.get("total_assists") or stat.get("totalAssists") or stat.get("assists"),
+        "mvps": stat.get("mvps") or stat.get("mvp"),
+        "score": stat.get("score"),
+        "ping": stat.get("ping") or stat.get("average_ping"),
+        "accuracy_head": stat.get("accuracy_head") or stat.get("hsp") or stat.get("headshotPercentage"),
+        "initial_team_number": stat.get("initial_team_number") or stat.get("initialTeamNumber"),
+    }
+
+
+def _score_array_to_team_scores(score: list, stats: list[dict]) -> list[dict]:
+    if not isinstance(score, list) or len(score) < 2:
+        return []
+
+    team_numbers = sorted(
+        {
+            int(s.get("initial_team_number") or s.get("initialTeamNumber"))
+            for s in stats
+            if (s.get("initial_team_number") or s.get("initialTeamNumber")) is not None
+        }
+    )
+    if len(team_numbers) >= 2:
+        return [
+            {"team_number": team_numbers[0], "score": int(score[0])},
+            {"team_number": team_numbers[1], "score": int(score[1])},
+        ]
+
+    return [
+        {"team_number": 2, "score": int(score[0])},
+        {"team_number": 3, "score": int(score[1])},
+    ]
+
+
+def normalize_leetify_match_data(data: dict) -> dict:
+    normalized = dict(data)
+    if data.get("dataSource") and not data.get("data_source"):
+        normalized["data_source"] = data["dataSource"]
+    if data.get("mapName") and not data.get("map_name"):
+        normalized["map_name"] = data["mapName"]
+    if data.get("finishedAt") and not data.get("finished_at"):
+        normalized["finished_at"] = data["finishedAt"]
+    if data.get("replayUrl") and not data.get("replay_url"):
+        normalized["replay_url"] = data["replayUrl"]
+
+    raw_stats = data.get("stats") or data.get("playerStats") or []
+    if raw_stats and not normalized.get("stats"):
+        normalized["stats"] = [_normalize_player_stat(s) for s in raw_stats]
+
+    team_scores = data.get("team_scores") or data.get("teamScores")
+    if not team_scores and isinstance(data.get("score"), list):
+        normalized["team_scores"] = _score_array_to_team_scores(data["score"], normalized.get("stats") or [])
+    elif team_scores:
+        normalized["team_scores"] = team_scores
+
+    return normalized
+
+
+def _needs_full_leetify_match(data: dict) -> bool:
+    stats = data.get("stats") or data.get("playerStats") or []
+    return bool(data.get("id")) and len(stats) < 2
+
+
 async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict) -> None:
+    leetify_data = normalize_leetify_match_data(leetify_data)
     my_steam64 = await get_my_steam64_id(db)
 
     map_name = leetify_data.get("map_name") or leetify_data.get("mapName")
@@ -414,6 +482,7 @@ async def find_match_for_leetify(db: AsyncSession, leetify_data: dict) -> Match 
 
 
 async def create_match_from_leetify(db: AsyncSession, leetify_data: dict, my_steam64: str) -> Match:
+    leetify_data = normalize_leetify_match_data(leetify_data)
     source, source_match_id, share_code, mode = _leetify_match_identity(leetify_data)
     map_name = leetify_data.get("map_name") or leetify_data.get("mapName")
     finished_at = _parse_leetify_datetime(leetify_data.get("finished_at") or leetify_data.get("finishedAt"))
@@ -465,8 +534,9 @@ async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str
         }
 
     logger.info(
-        "Leetify import: processing %d matches (profile has %s total on Leetify)",
+        "Leetify import: processing %d matches via %s (profile has %s total on Leetify)",
         len(entries),
+        meta.get("import_source", "unknown"),
         meta.get("profile_total_matches"),
     )
     imported = 0
@@ -475,11 +545,11 @@ async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str
 
     for idx, entry in enumerate(entries, start=1):
         try:
-            data = entry
-            if not entry.get("stats") and entry.get("id"):
-                full, _ = await client.get_match_by_game_id(str(entry["id"]))
+            data = normalize_leetify_match_data(entry)
+            if _needs_full_leetify_match(data):
+                full, _ = await client.get_match_by_game_id(str(data["id"]))
                 if full:
-                    data = full
+                    data = normalize_leetify_match_data(full)
 
             existing = await find_match_for_leetify(db, data)
             if existing:
@@ -538,7 +608,7 @@ async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str
             logger.info("Leetify enrich progress: %d/%d enriched", enriched, idx)
 
     message_parts = [
-        f"Profile: {imported} new, {updated} updated from {len(entries)} Leetify matches",
+        f"Import ({meta.get('import_source', 'leetify')}): {imported} new, {updated} updated from {len(entries)} games",
         f"DB enrich: {enriched} additional matches got Leetify data",
     ]
     if meta.get("api_limit_note"):

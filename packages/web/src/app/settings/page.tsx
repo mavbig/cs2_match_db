@@ -293,9 +293,9 @@ export default function SettingsPage() {
           </button>
         </div>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
-          Leetify import refreshes stats from your Leetify profile and enriches existing DB matches. The public
-          Leetify API typically exposes only your most recent ~100 games — for older history use Steam sync or
-          FACEIT sync. Results appear here when the job finishes.
+          Leetify import walks your full Leetify history (same API the website uses) in 6-month chunks,
+          then fetches full match details. Steam sync only reaches back to your oldest share code.
+          Large imports can take 30+ minutes.
         </p>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>

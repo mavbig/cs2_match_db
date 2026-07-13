@@ -1,5 +1,6 @@
+import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import httpx
@@ -16,7 +17,8 @@ MATCHMAKING_DATA_SOURCES = (
 
 
 class LeetifyClient:
-    BASE = "https://api-public.cs-prod.leetify.com"
+    PUBLIC_BASE = "https://api-public.cs-prod.leetify.com"
+    INTERNAL_BASE = "https://api.cs-prod.leetify.com"
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.leetify_api_key
@@ -29,32 +31,44 @@ class LeetifyClient:
             "_leetify_key": self.api_key,
         }
 
-    async def _get_json(self, path: str, *, params: dict | None = None) -> tuple[dict | list | None, int, str | None]:
-        async with httpx.AsyncClient(timeout=60) as client:
+    async def _request_json(
+        self,
+        base: str,
+        path: str,
+        *,
+        params: dict | None = None,
+    ) -> tuple[dict | list | None, int, str | None]:
+        async with httpx.AsyncClient(timeout=90) as client:
             resp = await client.get(
-                f"{self.BASE}{path}",
+                f"{base}{path}",
                 params=params,
                 headers=self._headers(),
             )
-            if resp.status_code in (404, 401):
-                return None, resp.status_code, None
+            if resp.status_code in (404, 401, 403):
+                return None, resp.status_code, (resp.text or "")[:200] or None
             if resp.status_code >= 500:
                 body = (resp.text or "")[:200]
-                logger.warning("Leetify %s returned %s: %s", path, resp.status_code, body)
+                logger.warning("Leetify %s%s returned %s: %s", base, path, resp.status_code, body)
                 return None, resp.status_code, body or "server error"
             if resp.status_code >= 400:
                 return None, resp.status_code, resp.text[:200] if resp.text else None
             return resp.json(), resp.status_code, None
 
+    async def _get_public_json(self, path: str, *, params: dict | None = None):
+        return await self._request_json(self.PUBLIC_BASE, path, params=params)
+
+    async def _get_internal_json(self, path: str, *, params: dict | None = None):
+        return await self._request_json(self.INTERNAL_BASE, path, params=params)
+
     async def get_profile(self, steam64_id: str) -> dict | None:
-        data, _, _ = await self._get_json("/v3/profile", params={"steam64_id": steam64_id})
+        data, _, _ = await self._get_public_json("/v3/profile", params={"steam64_id": steam64_id})
         return data if isinstance(data, dict) else None
 
     def _parse_matches_response(self, data) -> list[dict]:
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
-            for key in ("matches", "data", "items", "results"):
+            for key in ("matches", "games", "data", "items", "results"):
                 matches = data.get(key)
                 if isinstance(matches, list):
                     return matches
@@ -68,8 +82,6 @@ class LeetifyClient:
         offset: int = 0,
         before: str | None = None,
     ) -> list[dict] | None:
-        # Leetify expects steam64_id for your own history. Sending profile `id` together
-        # with steam64_id returns HTTP 200 with an empty payload.
         params: dict = {"steam64_id": steam64_id}
         if limit is not None:
             params["limit"] = limit
@@ -78,7 +90,7 @@ class LeetifyClient:
         if before:
             params["before"] = before
 
-        data, status, err = await self._get_json("/v3/profile/matches", params=params)
+        data, status, err = await self._get_public_json("/v3/profile/matches", params=params)
         if data is None:
             if status >= 500:
                 logger.warning("Leetify profile/matches failed for %s: %s", steam64_id, err)
@@ -93,10 +105,98 @@ class LeetifyClient:
             )
         return page
 
+    async def get_games_history(self, start: datetime, end: datetime) -> list[dict] | None:
+        filters = {
+            "currentPeriod": {
+                "start": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                "end": end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.999Z"),
+            },
+            "isPeriodSetManually": True,
+        }
+        data, status, err = await self._get_internal_json(
+            "/api/v2/games/history",
+            params={"filters": json.dumps(filters, separators=(",", ":"))},
+        )
+        if data is None:
+            if status in (401, 403):
+                logger.info("Leetify games/history not available with API key (HTTP %s)", status)
+            elif status >= 500:
+                logger.warning("Leetify games/history failed: %s", err)
+            return None
+        return self._parse_matches_response(data)
+
+    async def get_all_games_history(
+        self,
+        *,
+        chunk_days: int = 180,
+        max_years: int = 10,
+    ) -> tuple[list[dict], dict]:
+        collected: list[dict] = []
+        seen_ids: set[str] = set()
+        end = datetime.now(timezone.utc)
+        earliest = end - timedelta(days=max_years * 365)
+        windows = 0
+
+        while end > earliest:
+            start = max(earliest, end - timedelta(days=chunk_days))
+            page = await self.get_games_history(start, end)
+            windows += 1
+            if page is None:
+                if not collected:
+                    return [], {"history_available": False, "history_windows": windows}
+                break
+            if not page:
+                if windows == 1:
+                    return [], {"history_available": True, "history_windows": windows}
+                break
+
+            added = 0
+            for game in page:
+                game_id = str(game.get("id") or "")
+                if game_id and game_id in seen_ids:
+                    continue
+                if game_id:
+                    seen_ids.add(game_id)
+                collected.append(game)
+                added += 1
+
+            logger.info(
+                "Leetify games/history %s..%s: page=%d added=%d total=%d",
+                start.date(),
+                end.date(),
+                len(page),
+                added,
+                len(collected),
+            )
+
+            if start <= earliest:
+                break
+            end = start - timedelta(seconds=1)
+
+        return collected, {
+            "history_available": True,
+            "history_windows": windows,
+            "fetched": len(collected),
+            "import_source": "games_history",
+        }
+
     async def get_all_profile_matches(self, steam64_id: str) -> tuple[list[dict], dict]:
         profile = await self.get_profile(steam64_id)
         leetify_id = str(profile.get("id")) if profile and profile.get("id") else None
         total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
+
+        history_games, history_meta = await self.get_all_games_history()
+        if history_games:
+            meta = {
+                "profile_total_matches": total_on_profile,
+                "leetify_user_id": leetify_id,
+                **history_meta,
+            }
+            if total_on_profile and len(history_games) < total_on_profile:
+                meta["api_limit_note"] = (
+                    f"Fetched {len(history_games)} of {total_on_profile} Leetify games via history API."
+                )
+            return history_games, meta
 
         page_size = 100
         offset = 0
@@ -166,17 +266,18 @@ class LeetifyClient:
             "profile_total_matches": total_on_profile,
             "leetify_user_id": leetify_id,
             "fetched": len(collected),
+            "import_source": "profile_matches",
         }
         if total_on_profile and len(collected) < total_on_profile:
             meta["api_limit_note"] = (
-                f"Leetify API returned {len(collected)} of {total_on_profile} matches on your profile. "
-                "The public API may only expose your most recent games."
+                f"Leetify public API returned {len(collected)} of {total_on_profile} matches. "
+                "Full history requires the Leetify website session API (games/history)."
             )
         return collected, meta
 
     async def get_match_by_game_id(self, game_id: str) -> tuple[dict | None, str | None]:
         encoded_id = quote(game_id, safe="")
-        data, status, err = await self._get_json(f"/v2/matches/{encoded_id}")
+        data, status, err = await self._get_public_json(f"/v2/matches/{encoded_id}")
         if isinstance(data, dict):
             return data, None
         if status >= 500:
@@ -187,7 +288,7 @@ class LeetifyClient:
         encoded_source = quote(data_source, safe="")
         encoded_id = quote(data_source_id, safe="")
         path = f"/v2/matches/{encoded_source}/{encoded_id}"
-        data, status, err = await self._get_json(path)
+        data, status, err = await self._get_public_json(path)
         if isinstance(data, dict):
             return data, None
         if status >= 500:
@@ -226,8 +327,6 @@ class LeetifyClient:
                     played_at=played_at,
                 )
                 if entry:
-                    if entry.get("stats"):
-                        return entry, "profile_matches", notes
                     game_id = entry.get("id")
                     if game_id:
                         data, err = await self.get_match_by_game_id(str(game_id))
@@ -235,8 +334,10 @@ class LeetifyClient:
                             return data, f"profile_game_id:{game_id}", notes
                         if err:
                             notes.append(err)
-                    entry_source = entry.get("data_source")
-                    entry_id = entry.get("data_source_match_id")
+                    if entry.get("stats"):
+                        return entry, "profile_matches", notes
+                    entry_source = entry.get("data_source") or entry.get("dataSource")
+                    entry_id = entry.get("data_source_match_id") or entry.get("dataSourceMatchId")
                     if entry_source and entry_id:
                         data, err = await self.get_match_by_source(str(entry_source), str(entry_id))
                         if data:
@@ -289,7 +390,7 @@ def _find_history_match(
     share_norm = normalize_code(share_code)
 
     for entry in history:
-        ds_id = entry.get("data_source_match_id")
+        ds_id = entry.get("data_source_match_id") or entry.get("dataSourceMatchId")
         if share_norm and normalize_code(str(ds_id) if ds_id else None) == share_norm:
             return entry
         if source_match_id and ds_id and str(ds_id) == str(source_match_id):

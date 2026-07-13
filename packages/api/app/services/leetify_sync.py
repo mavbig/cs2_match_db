@@ -445,15 +445,23 @@ async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str
     logger.info("Leetify import: fetching match history for %s", steam64_id)
     entries, meta = await client.get_all_profile_matches(steam64_id)
     if not entries:
-        logger.warning("Leetify import: profile/matches returned nothing for %s", steam64_id)
+        profile_total = meta.get("profile_total_matches")
+        if profile_total:
+            error = (
+                f"Leetify profile lists {profile_total} matches but profile/matches returned none. "
+                "This is usually a temporary Leetify API issue — try again in a few minutes."
+            )
+        else:
+            error = "Could not fetch Leetify profile matches (profile may be private or API unavailable)"
+        logger.warning("Leetify import: profile/matches returned nothing for %s (%s)", steam64_id, error)
         return {
             "total": 0,
             "imported": 0,
             "updated": 0,
             "enriched": 0,
             "failed": 0,
-            "profile_total_matches": meta.get("profile_total_matches"),
-            "error": "Could not fetch Leetify profile matches (check API key and profile privacy)",
+            "profile_total_matches": profile_total,
+            "error": error,
         }
 
     logger.info(

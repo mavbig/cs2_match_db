@@ -866,10 +866,15 @@ async def import_leetify_profile(ctx, sync_job_id: str | None = None):
             resp = await client.post("/api/v1/import/leetify")
             if resp.is_success:
                 result = resp.json()
-                msg = result.get("message") or (
-                    f"{result.get('imported', 0)} new, {result.get('updated', 0)} updated, "
-                    f"{result.get('enriched', 0)} enriched"
-                )
+                if result.get("error"):
+                    msg = str(result["error"])
+                elif result.get("message"):
+                    msg = str(result["message"])
+                else:
+                    msg = (
+                        f"{result.get('imported', 0)} new, {result.get('updated', 0)} updated, "
+                        f"{result.get('enriched', 0)} enriched"
+                    )
                 logger.info("Leetify profile import: %s", msg)
                 if job_id:
                     async with Session() as session:

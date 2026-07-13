@@ -93,6 +93,43 @@ def _aggregate_faceit_recent(items: list, limit: int = 20) -> dict:
     }
 
 
+def _parse_faceit_timestamp(raw) -> datetime | None:
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                return None
+            if text.isdigit():
+                value = int(text)
+            else:
+                return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+        elif isinstance(raw, (int, float)):
+            value = int(raw)
+        else:
+            return None
+        # FACEIT per-match stats use epoch milliseconds; history uses epoch seconds.
+        if value > 1_000_000_000_000:
+            value //= 1000
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _faceit_item_finished_at(item: dict) -> datetime | None:
+    stats = item.get("stats") or {}
+    for candidate in (
+        item.get("finished_at"),
+        item.get("date"),
+        _get_player_stat(stats, "Match Finished At", "Match Finished"),
+    ):
+        finished_at = _parse_faceit_timestamp(candidate)
+        if finished_at:
+            return finished_at
+    return None
+
+
 def _parse_match_result(stats: dict) -> str | None:
     raw = _get_player_stat(stats, "Result", "Win")
     if raw is None:
@@ -188,29 +225,16 @@ def _build_faceit_activity(
         )
 
     for item in history_items:
-        finished = item.get("finished_at")
         match_id = str(item.get("match_id") or "")
-        if not finished or not match_id:
+        finished_at = _faceit_item_finished_at(item)
+        if not match_id or not finished_at:
             continue
-        add_match(
-            match_id,
-            datetime.fromtimestamp(int(finished), tz=timezone.utc),
-            result_by_match.get(match_id),
-        )
+        add_match(match_id, finished_at, result_by_match.get(match_id))
 
     for item in recent_items:
         match_id = str(item.get("match_id") or "")
-        if not match_id:
-            continue
-        raw_date = item.get("date") or item.get("finished_at")
-        if raw_date is None:
-            continue
-        try:
-            if isinstance(raw_date, (int, float)):
-                finished_at = datetime.fromtimestamp(int(raw_date), tz=timezone.utc)
-            else:
-                finished_at = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00")).astimezone(timezone.utc)
-        except (TypeError, ValueError):
+        finished_at = _faceit_item_finished_at(item)
+        if not match_id or not finished_at:
             continue
         add_match(match_id, finished_at, result_by_match.get(match_id))
 

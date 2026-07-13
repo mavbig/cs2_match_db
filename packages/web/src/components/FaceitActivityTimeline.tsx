@@ -29,7 +29,7 @@ export function FaceitActivityTimeline({ activity }: { activity: FaceitActivity 
   if (!hasDots && !hasMonths) {
     return (
       <p style={{ color: "var(--muted)", fontSize: "0.9rem", margin: 0 }}>
-        No recent FACEIT match history — sync profile to refresh activity.
+        No recent FACEIT match history yet. Click Sync profile above, then hard-refresh this page.
       </p>
     );
   }

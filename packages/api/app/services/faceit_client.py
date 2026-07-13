@@ -41,6 +41,8 @@ class FaceitClient:
             return resp.json()
 
     async def get_match_history(self, player_id: str, offset: int = 0, limit: int = 20) -> dict:
+        if not self.api_key:
+            return {"items": []}
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 f"{self.BASE}/players/{player_id}/history",

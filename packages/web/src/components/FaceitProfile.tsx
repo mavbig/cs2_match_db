@@ -218,14 +218,23 @@ export function FaceitProfile({ faceit }: { faceit: FaceitProfileStats }) {
         </div>
       )}
 
-      {faceit.activity && (
-        <div style={{ marginBottom: "1.25rem" }}>
-          <h3 style={{ fontSize: "0.95rem", marginBottom: "0.75rem", color: "var(--muted)" }}>
-            Activity timeline
-          </h3>
-          <FaceitActivityTimeline activity={faceit.activity} />
-        </div>
-      )}
+      <div style={{ marginBottom: "1.25rem" }}>
+        <h3 style={{ fontSize: "0.95rem", marginBottom: "0.75rem", color: "var(--muted)" }}>
+          Activity timeline
+        </h3>
+        <FaceitActivityTimeline
+          activity={
+            faceit.activity ?? {
+              matches: [],
+              last_played_at: null,
+              days_since_last: null,
+              months: [],
+              stale_warning: null,
+              sample_size: 0,
+            }
+          }
+        />
+      </div>
 
       {(hasLifetime || hasRecent) && (
         <div className="grid-2">

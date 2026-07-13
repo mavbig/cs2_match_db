@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FaceitProfile, FaceitProfileStats } from "@/components/FaceitProfile";
+import { LeetifyProfile, LeetifyProfileStats } from "@/components/LeetifyProfile";
 import { MatchSourceBadge } from "@/components/MatchSourceBadge";
 import { PlayerProfileDebug } from "@/components/PlayerProfileDebug";
 import { PlayerProfileLinks } from "@/components/PlayerProfileLinks";
@@ -17,8 +18,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
     notFound();
   }
 
-  const leetify = player.latest_stats.leetify as Record<string, unknown> | undefined;
-  const rating = leetify?.rating as Record<string, number> | undefined;
+  const leetify = player.latest_stats.leetify as LeetifyProfileStats | undefined;
   const faceit = player.latest_stats.faceit as FaceitProfileStats | undefined;
   const faceitAccount = player.platform_accounts.find((a) => a.platform === "faceit");
   const faceitProfileUrl =
@@ -85,38 +85,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
       {faceit && <FaceitProfile faceit={faceit} />}
 
-      {leetify && (
-        <div className="card" style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <MatchSourceBadge source="leetify" size={22} />
-            Leetify
-          </h2>
-          <div className="stat-grid" style={{ marginBottom: rating ? "1rem" : 0 }}>
-            {leetify.total_matches != null && (
-              <div className="stat-box">
-                <div className="value">{String(leetify.total_matches)}</div>
-                <div className="label">Matches</div>
-              </div>
-            )}
-            {leetify.winrate != null && (
-              <div className="stat-box">
-                <div className="value">{Math.round(Number(leetify.winrate) * 100)}%</div>
-                <div className="label">Winrate</div>
-              </div>
-            )}
-          </div>
-          {rating && (
-            <div className="stat-grid">
-              {Object.entries(rating).map(([key, val]) => (
-                <div key={key} className="stat-box">
-                  <div className="value">{typeof val === "number" ? Math.round(val) : "—"}</div>
-                  <div className="label">{key.replace(/_/g, " ")}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {leetify && <LeetifyProfile leetify={leetify} />}
 
       {player.platform_accounts.length > 0 && (
         <div className="card" style={{ marginBottom: "1.5rem" }}>

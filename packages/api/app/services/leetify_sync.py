@@ -439,20 +439,28 @@ async def create_match_from_leetify(db: AsyncSession, leetify_data: dict, my_ste
 
 
 async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str) -> dict:
+    from sqlalchemy import text
+
     client = LeetifyClient(api_key)
     logger.info("Leetify import: fetching match history for %s", steam64_id)
-    entries = await client.get_all_profile_matches(steam64_id)
-    if entries is None:
+    entries, meta = await client.get_all_profile_matches(steam64_id)
+    if not entries:
         logger.warning("Leetify import: profile/matches returned nothing for %s", steam64_id)
         return {
             "total": 0,
             "imported": 0,
             "updated": 0,
+            "enriched": 0,
             "failed": 0,
+            "profile_total_matches": meta.get("profile_total_matches"),
             "error": "Could not fetch Leetify profile matches (check API key and profile privacy)",
         }
 
-    logger.info("Leetify import: processing %d matches", len(entries))
+    logger.info(
+        "Leetify import: processing %d matches (profile has %s total on Leetify)",
+        len(entries),
+        meta.get("profile_total_matches"),
+    )
     imported = 0
     updated = 0
     failed = 0
@@ -487,16 +495,60 @@ async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str
                 failed,
             )
 
-    logger.info(
-        "Leetify import finished: %d total, %d new, %d updated, %d failed",
-        len(entries),
-        imported,
-        updated,
-        failed,
+    enriched = 0
+    enrich_failed = 0
+    result = await db.execute(
+        text(
+            """
+            SELECT id FROM matches
+            WHERE share_code IS NOT NULL OR source IN ('faceit', 'steam_gc')
+            ORDER BY played_at DESC NULLS LAST
+            LIMIT 1000
+            """
+        )
     )
+    match_ids = [row[0] for row in result.fetchall()]
+    logger.info("Leetify import: enriching up to %d existing DB matches", len(match_ids))
+
+    for idx, match_id in enumerate(match_ids, start=1):
+        match = await get_match_with_players(db, match_id)
+        if not match:
+            continue
+        enrichment = (match.raw_payload or {}).get("_enrichment") or {}
+        if enrichment.get("leetify") and enrichment.get("leetify_synced_at"):
+            continue
+        try:
+            sync_result = await sync_match_from_sources(db, match_id)
+            if "leetify" in sync_result.get("sources", []):
+                enriched += 1
+            await db.commit()
+        except Exception:
+            enrich_failed += 1
+            logger.exception("Leetify enrich failed for match %s", match_id)
+
+        if idx % 50 == 0:
+            logger.info("Leetify enrich progress: %d/%d enriched", enriched, idx)
+
+    message_parts = [
+        f"Profile: {imported} new, {updated} updated from {len(entries)} Leetify matches",
+        f"DB enrich: {enriched} additional matches got Leetify data",
+    ]
+    if meta.get("api_limit_note"):
+        message_parts.append(str(meta["api_limit_note"]))
+    if imported == 0 and updated > 0:
+        message_parts.append(
+            "All recent Leetify matches were already in your database — stats were refreshed."
+        )
+
+    logger.info("Leetify import finished: %s", " · ".join(message_parts))
+
     return {
         "total": len(entries),
         "imported": imported,
         "updated": updated,
-        "failed": failed,
+        "enriched": enriched,
+        "failed": failed + enrich_failed,
+        "profile_total_matches": meta.get("profile_total_matches"),
+        "message": " · ".join(message_parts),
+        "api_limit_note": meta.get("api_limit_note"),
     }

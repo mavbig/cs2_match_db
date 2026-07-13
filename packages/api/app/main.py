@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 from app.routes import router
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="CS2 Match DB", version="1.0.0")
 

@@ -848,24 +848,73 @@ async def sync_leetify_matches(ctx):
     logger.info("Leetify bulk sync finished: %d ok, %d failed, %d total", synced, failed, len(match_ids))
 
 
-async def import_leetify_profile(ctx):
-    logger.info("Leetify profile import job started")
+async def import_leetify_profile(ctx, sync_job_id: str | None = None):
+    from sqlalchemy import text
+
+    logger.info("Leetify profile import job started (sync_job_id=%s)", sync_job_id)
+    job_id = sync_job_id
+    if job_id:
+        async with Session() as session:
+            await session.execute(
+                text("UPDATE sync_jobs SET status = 'running' WHERE id = :id"),
+                {"id": job_id},
+            )
+            await session.commit()
+
     async with httpx.AsyncClient(base_url=settings.api_internal_url, timeout=7200.0) as client:
         try:
             resp = await client.post("/api/v1/import/leetify")
             if resp.is_success:
                 result = resp.json()
-                logger.info(
-                    "Leetify profile import: %d total, %d new, %d updated, %d failed",
-                    result.get("total", 0),
-                    result.get("imported", 0),
-                    result.get("updated", 0),
-                    result.get("failed", 0),
+                msg = result.get("message") or (
+                    f"{result.get('imported', 0)} new, {result.get('updated', 0)} updated, "
+                    f"{result.get('enriched', 0)} enriched"
                 )
+                logger.info("Leetify profile import: %s", msg)
+                if job_id:
+                    async with Session() as session:
+                        await session.execute(
+                            text(
+                                "UPDATE sync_jobs SET status = 'completed', finished_at = :now, "
+                                "matches_imported = :n, error_message = :msg WHERE id = :id"
+                            ),
+                            {
+                                "now": datetime.now(timezone.utc),
+                                "n": (
+                                    result.get("imported", 0)
+                                    + result.get("updated", 0)
+                                    + result.get("enriched", 0)
+                                ),
+                                "msg": msg,
+                                "id": job_id,
+                            },
+                        )
+                        await session.commit()
             else:
-                logger.warning("Leetify profile import HTTP %s: %s", resp.status_code, resp.text[:300])
-        except Exception:
+                err = resp.text[:500]
+                logger.warning("Leetify profile import HTTP %s: %s", resp.status_code, err)
+                if job_id:
+                    async with Session() as session:
+                        await session.execute(
+                            text(
+                                "UPDATE sync_jobs SET status = 'failed', finished_at = :now, "
+                                "error_message = :msg WHERE id = :id"
+                            ),
+                            {"now": datetime.now(timezone.utc), "msg": err, "id": job_id},
+                        )
+                        await session.commit()
+        except Exception as exc:
             logger.exception("Leetify profile import failed")
+            if job_id:
+                async with Session() as session:
+                    await session.execute(
+                        text(
+                            "UPDATE sync_jobs SET status = 'failed', finished_at = :now, "
+                            "error_message = :msg WHERE id = :id"
+                        ),
+                        {"now": datetime.now(timezone.utc), "msg": str(exc), "id": job_id},
+                    )
+                    await session.commit()
 
 
 class WorkerSettings:

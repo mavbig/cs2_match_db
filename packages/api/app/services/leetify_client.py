@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from urllib.parse import quote
 
 import httpx
@@ -29,7 +30,7 @@ class LeetifyClient:
         }
 
     async def _get_json(self, path: str, *, params: dict | None = None) -> tuple[dict | list | None, int, str | None]:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.get(
                 f"{self.BASE}{path}",
                 params=params,
@@ -49,38 +50,58 @@ class LeetifyClient:
         data, _, _ = await self._get_json("/v3/profile", params={"steam64_id": steam64_id})
         return data if isinstance(data, dict) else None
 
-    async def get_profile_matches(self, steam64_id: str, *, limit: int | None = None, offset: int = 0) -> list[dict] | None:
-        params: dict = {"steam64_id": steam64_id}
-        if limit is not None:
-            params["limit"] = limit
-        if offset:
-            params["offset"] = offset
-        data, status, err = await self._get_json("/v3/profile/matches", params=params)
-        if data is None:
-            if status >= 500:
-                logger.warning("Leetify profile/matches failed for %s: %s", steam64_id, err)
-            return None
+    def _parse_matches_response(self, data) -> list[dict]:
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
             matches = data.get("matches")
             if isinstance(matches, list):
                 return matches
-        return None
+        return []
 
-    async def get_all_profile_matches(self, steam64_id: str) -> list[dict] | None:
-        page_size = 100
-        offset = 0
+    async def _fetch_matches_page(
+        self,
+        *,
+        steam64_id: str | None,
+        leetify_id: str | None,
+        offset: int = 0,
+        before: str | None = None,
+    ) -> list[dict]:
+        param_sets: list[dict] = []
+        base: dict = {}
+        if leetify_id:
+            base["id"] = leetify_id
+        if steam64_id:
+            base["steam64_id"] = steam64_id
+
+        if before:
+            param_sets.append({**base, "before": before})
+            param_sets.append({**base, "finished_before": before})
+            param_sets.append({**base, "end_date": before})
+        if offset:
+            param_sets.append({**base, "offset": offset, "limit": 100})
+            param_sets.append({**base, "offset": offset})
+        if not param_sets:
+            param_sets.append(dict(base))
+
+        for params in param_sets:
+            data, status, _ = await self._get_json("/v3/profile/matches", params=params)
+            if status == 401:
+                return []
+            page = self._parse_matches_response(data)
+            if page:
+                return page
+        return []
+
+    async def get_all_profile_matches(self, steam64_id: str) -> tuple[list[dict], dict]:
+        profile = await self.get_profile(steam64_id)
+        leetify_id = str(profile.get("id")) if profile and profile.get("id") else None
+        total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
+
         collected: list[dict] = []
         seen_ids: set[str] = set()
 
-        while offset < 50_000:
-            page = await self.get_profile_matches(steam64_id, limit=page_size, offset=offset)
-            if page is None:
-                return collected if collected else None
-            if not page:
-                break
-
+        def absorb(page: list[dict]) -> int:
             added = 0
             for entry in page:
                 entry_id = str(entry.get("id") or "")
@@ -90,12 +111,72 @@ class LeetifyClient:
                     seen_ids.add(entry_id)
                 collected.append(entry)
                 added += 1
+            return added
 
-            if added == 0 or len(page) < page_size:
+        offset = 0
+        while offset < 50_000:
+            page = await self._fetch_matches_page(
+                steam64_id=steam64_id,
+                leetify_id=leetify_id,
+                offset=offset,
+            )
+            if not page:
                 break
-            offset += page_size
+            added = absorb(page)
+            logger.info(
+                "Leetify profile/matches offset=%d: page=%d added=%d total=%d",
+                offset,
+                len(page),
+                added,
+                len(collected),
+            )
+            if added == 0 or len(page) < 100:
+                break
+            offset += 100
 
-        return collected
+        if total_on_profile and len(collected) < total_on_profile and collected:
+            sorted_entries = sorted(
+                collected,
+                key=lambda e: str(e.get("finished_at") or e.get("finishedAt") or ""),
+            )
+            before = sorted_entries[0].get("finished_at") or sorted_entries[0].get("finishedAt")
+            for attempt in range(30):
+                if not before:
+                    break
+                page = await self._fetch_matches_page(
+                    steam64_id=steam64_id,
+                    leetify_id=leetify_id,
+                    before=str(before),
+                )
+                if not page:
+                    break
+                added = absorb(page)
+                logger.info(
+                    "Leetify profile/matches before=%s: page=%d added=%d total=%d",
+                    before,
+                    len(page),
+                    added,
+                    len(collected),
+                )
+                if added == 0:
+                    break
+                sorted_entries = sorted(
+                    collected,
+                    key=lambda e: str(e.get("finished_at") or e.get("finishedAt") or ""),
+                )
+                before = sorted_entries[0].get("finished_at") or sorted_entries[0].get("finishedAt")
+
+        meta = {
+            "profile_total_matches": total_on_profile,
+            "leetify_user_id": leetify_id,
+            "fetched": len(collected),
+        }
+        if total_on_profile and len(collected) < total_on_profile:
+            meta["api_limit_note"] = (
+                f"Leetify API returned {len(collected)} of {total_on_profile} matches on your profile. "
+                "The public API may only expose your most recent games."
+            )
+        return collected, meta
 
     async def get_match_by_game_id(self, game_id: str) -> tuple[dict | None, str | None]:
         encoded_id = quote(game_id, safe="")
@@ -138,8 +219,8 @@ class LeetifyClient:
                 notes.append(err)
 
         if my_steam64_id:
-            history = await self.get_all_profile_matches(my_steam64_id)
-            if history is None:
+            history, _ = await self.get_all_profile_matches(my_steam64_id)
+            if not history:
                 notes.append("profile/matches unavailable")
             else:
                 entry = _find_history_match(
@@ -232,8 +313,6 @@ def _find_history_match(
         if not finished:
             continue
         try:
-            from datetime import datetime
-
             entry_ts = datetime.fromisoformat(str(finished).replace("Z", "+00:00")).timestamp()
         except ValueError:
             continue

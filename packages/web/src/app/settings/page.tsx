@@ -1,7 +1,35 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, Settings } from "@/lib/api";
+import { api, Settings, SyncJob } from "@/lib/api";
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatSyncJobMessage(job: SyncJob | undefined): string {
+  if (!job) return "Sync finished (job details unavailable).";
+  if (job.status === "failed") {
+    return job.error_message || "Sync failed.";
+  }
+  if (job.error_message) {
+    return job.error_message;
+  }
+  return `Sync completed — ${job.matches_imported} matches processed.`;
+}
+
+function isPositiveMessage(message: string): boolean {
+  return (
+    message.includes("success") ||
+    message.includes("triggered") ||
+    message.includes("queued") ||
+    message.includes("new") ||
+    message.includes("updated") ||
+    message.includes("enriched") ||
+    message.includes("completed") ||
+    message.includes("running")
+  );
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -46,14 +74,47 @@ export default function SettingsPage() {
     }
   }
 
+  async function pollSyncJob(jobId: string, label: string) {
+    for (let i = 0; i < 720; i++) {
+      await sleep(5000);
+      try {
+        const jobs = await api.syncJobs(10);
+        const job = jobs.find((j) => j.id === jobId);
+        if (!job) continue;
+        if (job.status === "running" || job.status === "pending") {
+          const progress =
+            job.matches_imported > 0
+              ? ` — ${job.matches_imported} matches processed so far`
+              : "";
+          setMessage(`${label} running${progress}…`);
+          continue;
+        }
+        setMessage(formatSyncJobMessage(job));
+        return;
+      } catch {
+        // keep polling
+      }
+    }
+    setMessage(`${label} is still running — check docker compose logs -f worker`);
+  }
+
   async function triggerSync(type: string) {
     setMessage(null);
     try {
-      await api.triggerSync(type);
+      const job = await api.triggerSync(type);
       if (type === "steam_gc") {
         setMessage(
           "Steam full sync queued — steam-sync will start within ~15 seconds. Check progress: docker compose logs -f steam-sync"
         );
+      } else if (type === "leetify_import") {
+        setMessage("Leetify import started — fetching your match history…");
+        void pollSyncJob(job.id, "Leetify import");
+      } else if (type === "faceit") {
+        setMessage("FACEIT sync started — this may take 30+ minutes…");
+        void pollSyncJob(job.id, "FACEIT sync");
+      } else if (type === "leetify") {
+        setMessage("Leetify enrichment started…");
+        void pollSyncJob(job.id, "Leetify enrichment");
       } else {
         setMessage(`${type} sync triggered.`);
       }
@@ -111,7 +172,7 @@ export default function SettingsPage() {
           className="card"
           style={{
             marginBottom: "1rem",
-            borderColor: message.includes("success") || message.includes("triggered") || message.includes("queued") ? "var(--accent2)" : "var(--border)",
+            borderColor: isPositiveMessage(message) ? "var(--accent2)" : "var(--border)",
           }}
         >
           {message}
@@ -232,8 +293,9 @@ export default function SettingsPage() {
           </button>
         </div>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
-          Leetify import pulls your full match history (Premier, MM, FACEIT) and stores the complete Leetify payload
-          in the database. Use &quot;Enrich existing&quot; to refresh stats on matches already in the DB.
+          Leetify import refreshes stats from your Leetify profile and enriches existing DB matches. The public
+          Leetify API typically exposes only your most recent ~100 games — for older history use Steam sync or
+          FACEIT sync. Results appear here when the job finishes.
         </p>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>

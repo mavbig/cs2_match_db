@@ -153,6 +153,16 @@ export interface Dashboard {
   sync_status: SyncStatus;
 }
 
+export interface SyncJob {
+  id: string;
+  job_type: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  matches_imported: number;
+  error_message: string | null;
+}
+
 export interface Settings {
   my_steam64_id: string | null;
   steam_auth_code_set: boolean;
@@ -188,7 +198,8 @@ export const api = {
   updateSettings: (data: Record<string, string>) =>
     fetchApi<Settings>("/api/v1/settings", { method: "PUT", body: JSON.stringify(data) }),
   triggerSync: (jobType: string) =>
-    fetchApi<{ id: string; job_type: string; status: string }>(`/api/v1/sync/trigger/${jobType}`, { method: "POST" }),
+    fetchApi<SyncJob>(`/api/v1/sync/trigger/${jobType}`, { method: "POST" }),
+  syncJobs: (limit = 10) => fetchApi<SyncJob[]>(`/api/v1/sync/jobs?limit=${limit}`),
   importShareCode: (share_code: string) =>
     fetchApi<{ job_id: string; message: string }>("/api/v1/import/share-code", {
       method: "POST",

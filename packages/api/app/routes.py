@@ -558,7 +558,7 @@ async def trigger_sync(job_type: str, db: AsyncSession = Depends(get_db)):
         elif job_type == "leetify":
             await arq_redis.enqueue_job("sync_leetify_matches")
         elif job_type == "leetify_import":
-            await arq_redis.enqueue_job("import_leetify_profile")
+            await arq_redis.enqueue_job("import_leetify_profile", str(job.id))
         await arq_redis.aclose()
     except Exception:
         pass

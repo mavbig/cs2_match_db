@@ -8,11 +8,19 @@ function normalizeCountryCode(code: string | null | undefined): string | null {
   return upper;
 }
 
+const FLAGCDN_WIDTHS = [20, 40] as const;
+type FlagcdnWidth = (typeof FLAGCDN_WIDTHS)[number];
+
+function snapFlagcdnWidth(width: number): FlagcdnWidth {
+  return width <= 20 ? 20 : 40;
+}
+
 /** ISO 3166-1 alpha-2 → flag image URL (works on Windows; emoji flags often render as "AT"). */
-export function countryFlagSrc(code: string | null | undefined, width = 40): string | null {
+export function countryFlagSrc(code: string | null | undefined, width: FlagcdnWidth | number = 40): string | null {
   const normalized = normalizeCountryCode(code);
   if (!normalized) return null;
-  return `https://flagcdn.com/w${width}/${normalized.toLowerCase()}.png`;
+  const w = typeof width === "number" ? snapFlagcdnWidth(width) : width;
+  return `https://flagcdn.com/w${w}/${normalized.toLowerCase()}.png`;
 }
 
 export function countryLabel(code: string | null | undefined): string {

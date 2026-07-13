@@ -1,7 +1,7 @@
 import { countryFlagSrc, countryLabel } from "@/lib/country";
 
 export function CountryFlag({ code, size = 16 }: { code: string; size?: number }) {
-  const src = countryFlagSrc(code, size * 2);
+  const src = countryFlagSrc(code, size <= 20 ? 20 : 40);
   if (!src) return null;
   return (
     // eslint-disable-next-line @next/next/no-img-element

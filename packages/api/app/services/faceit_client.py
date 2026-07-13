@@ -52,6 +52,25 @@ class FaceitClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def get_all_match_history(self, player_id: str, *, max_items: int = 200) -> list[dict]:
+        items: list[dict] = []
+        offset = 0
+        page_size = 100
+        while len(items) < max_items:
+            batch = await self.get_match_history(
+                player_id,
+                offset=offset,
+                limit=min(page_size, max_items - len(items)),
+            )
+            page = batch.get("items") or []
+            if not page:
+                break
+            items.extend(page)
+            if len(page) < page_size:
+                break
+            offset += len(page)
+        return items
+
     async def get_match(self, match_id: str) -> dict:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(f"{self.BASE}/matches/{match_id}", headers=self._headers())
@@ -78,20 +97,49 @@ class FaceitClient:
             return resp.json()
 
     async def get_player_recent_match_stats(
-        self, player_id: str, game: str = "cs2", limit: int = 20
+        self,
+        player_id: str,
+        game: str = "cs2",
+        *,
+        offset: int = 0,
+        limit: int = 20,
     ) -> dict | None:
         if not self.api_key:
             return None
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 f"{self.BASE}/players/{player_id}/games/{game}/stats",
-                params={"limit": limit},
+                params={"offset": offset, "limit": limit},
                 headers=self._headers(),
             )
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
             return resp.json()
+
+    async def get_all_player_recent_match_stats(
+        self, player_id: str, *, game: str = "cs2", max_items: int = 100
+    ) -> list[dict]:
+        items: list[dict] = []
+        offset = 0
+        page_size = 100
+        while len(items) < max_items:
+            batch = await self.get_player_recent_match_stats(
+                player_id,
+                game,
+                offset=offset,
+                limit=min(page_size, max_items - len(items)),
+            )
+            if not batch:
+                break
+            page = batch.get("items") or []
+            if not page:
+                break
+            items.extend(page)
+            if len(page) < page_size:
+                break
+            offset += len(page)
+        return items
 
     async def get_player_bans(self, player_id: str, limit: int = 20) -> dict | None:
         if not self.api_key:

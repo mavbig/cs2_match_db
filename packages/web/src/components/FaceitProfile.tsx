@@ -229,6 +229,7 @@ export function FaceitProfile({ faceit }: { faceit: FaceitProfileStats }) {
               last_played_at: null,
               days_since_last: null,
               months: [],
+              chart_granularity: "month",
               stale_warning: null,
               sample_size: 0,
             }

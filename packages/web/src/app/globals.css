@@ -335,7 +335,6 @@ a:hover {
 
 .faceit-activity-chart {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 0.35rem;
   align-items: end;
   min-height: 110px;
@@ -384,7 +383,7 @@ a:hover {
 
 @media (max-width: 768px) {
   .faceit-activity-chart {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
     row-gap: 0.75rem;
   }
 }

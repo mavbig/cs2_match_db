@@ -18,6 +18,7 @@ export interface FaceitActivity {
   last_played_at: string | null;
   days_since_last: number | null;
   months: FaceitActivityMonth[];
+  chart_granularity?: "week" | "month";
   stale_warning?: string | null;
   sample_size?: number;
 }
@@ -25,6 +26,8 @@ export interface FaceitActivity {
 export function FaceitActivityTimeline({ activity }: { activity: FaceitActivity }) {
   const hasDots = activity.matches.length > 0;
   const hasMonths = activity.months.some((m) => m.count > 0);
+  const chartLabel =
+    activity.chart_granularity === "week" ? "Games per week" : "Games per month";
 
   if (!hasDots && !hasMonths) {
     return (
@@ -69,8 +72,11 @@ export function FaceitActivityTimeline({ activity }: { activity: FaceitActivity 
 
       {hasMonths && (
         <div>
-          <div className="faceit-activity-label">Games per month</div>
-          <div className="faceit-activity-chart">
+          <div className="faceit-activity-label">{chartLabel}</div>
+          <div
+            className="faceit-activity-chart"
+            style={{ gridTemplateColumns: `repeat(${activity.months.length}, minmax(0, 1fr))` }}
+          >
             {activity.months.map((month) => (
               <div key={month.month} className="faceit-activity-bar-col" title={`${month.label}: ${month.count} games`}>
                 <div className="faceit-activity-bar-track">

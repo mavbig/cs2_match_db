@@ -1,6 +1,7 @@
 import logging
 import re
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -92,7 +93,24 @@ def _aggregate_faceit_recent(items: list, limit: int = 20) -> dict:
     }
 
 
-def _compute_faceit_flags(lifetime: dict, recent: dict, bans: list) -> list[dict]:
+def _parse_match_result(stats: dict) -> str | None:
+    raw = _get_player_stat(stats, "Result", "Win")
+    if raw is None:
+        return None
+    text = str(raw).strip().lower()
+    if text in ("1", "win", "won", "true", "w"):
+        return "win"
+    if text in ("0", "loss", "lost", "false", "l"):
+        return "loss"
+    return None
+
+
+def _compute_faceit_flags(
+    lifetime: dict,
+    recent: dict,
+    bans: list,
+    activity: dict | None = None,
+) -> list[dict]:
     flags: list[dict] = []
     if bans:
         latest = bans[0]
@@ -127,13 +145,138 @@ def _compute_faceit_flags(lifetime: dict, recent: dict, bans: list) -> list[dict
             }
         )
 
+    if activity and activity.get("stale_warning"):
+        flags.append(
+            {
+                "severity": "medium",
+                "label": "Inactive FACEIT account",
+                "detail": activity["stale_warning"],
+            }
+        )
+
     return flags
+
+
+def _build_faceit_activity(
+    history_items: list[dict],
+    recent_items: list[dict],
+    *,
+    lifetime_matches: int | None,
+) -> dict:
+    result_by_match: dict[str, str] = {}
+    for item in recent_items:
+        match_id = item.get("match_id")
+        if not match_id:
+            continue
+        result = _parse_match_result(item.get("stats") or {})
+        if result:
+            result_by_match[str(match_id)] = result
+
+    seen: set[str] = set()
+    matches: list[dict] = []
+
+    def add_match(match_id: str, finished_at: datetime, result: str | None) -> None:
+        if not match_id or match_id in seen:
+            return
+        seen.add(match_id)
+        matches.append(
+            {
+                "match_id": match_id,
+                "finished_at": finished_at.isoformat(),
+                "result": result,
+            }
+        )
+
+    for item in history_items:
+        finished = item.get("finished_at")
+        match_id = str(item.get("match_id") or "")
+        if not finished or not match_id:
+            continue
+        add_match(
+            match_id,
+            datetime.fromtimestamp(int(finished), tz=timezone.utc),
+            result_by_match.get(match_id),
+        )
+
+    for item in recent_items:
+        match_id = str(item.get("match_id") or "")
+        if not match_id:
+            continue
+        raw_date = item.get("date") or item.get("finished_at")
+        if raw_date is None:
+            continue
+        try:
+            if isinstance(raw_date, (int, float)):
+                finished_at = datetime.fromtimestamp(int(raw_date), tz=timezone.utc)
+            else:
+                finished_at = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00")).astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        add_match(match_id, finished_at, result_by_match.get(match_id))
+
+    if not matches:
+        return {
+            "matches": [],
+            "last_played_at": None,
+            "days_since_last": None,
+            "months": [],
+            "stale_warning": None,
+            "sample_size": 0,
+        }
+
+    matches.sort(key=lambda entry: entry["finished_at"])
+    now = datetime.now(timezone.utc)
+    last_at = datetime.fromisoformat(matches[-1]["finished_at"].replace("Z", "+00:00"))
+    days_since = max(0, (now - last_at).days)
+
+    month_counts: Counter[str] = Counter()
+    for entry in matches:
+        dt = datetime.fromisoformat(entry["finished_at"].replace("Z", "+00:00"))
+        month_counts[dt.strftime("%Y-%m")] += 1
+
+    months: list[dict] = []
+    cursor = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    for _ in range(12):
+        key = cursor.strftime("%Y-%m")
+        months.append(
+            {
+                "month": key,
+                "label": cursor.strftime("%b '%y"),
+                "count": month_counts.get(key, 0),
+            }
+        )
+        cursor = (cursor.replace(day=1) - timedelta(days=1)).replace(day=1)
+    months.reverse()
+
+    max_count = max((m["count"] for m in months), default=1) or 1
+    for bucket in months:
+        bucket["height_pct"] = round(100 * bucket["count"] / max_count)
+
+    stale_warning = None
+    if days_since >= 180:
+        stale_warning = (
+            f"Last FACEIT game was {days_since} days ago — lifetime stats may not reflect current form."
+        )
+    elif days_since >= 90 and lifetime_matches and lifetime_matches >= 80:
+        stale_warning = (
+            f"No games in {days_since} days despite {lifetime_matches} lifetime matches."
+        )
+
+    return {
+        "matches": matches[-30:],
+        "last_played_at": last_at.isoformat(),
+        "days_since_last": days_since,
+        "months": months,
+        "stale_warning": stale_warning,
+        "sample_size": len(matches),
+    }
 
 
 async def _fetch_faceit_enrichment(client: FaceitClient, faceit_player_id: str) -> dict:
     lifetime_raw: dict = {}
     recent_items: list = []
     bans: list = []
+    history_items: list = []
 
     stats = await client.get_player_stats(faceit_player_id)
     if stats:
@@ -143,15 +286,27 @@ async def _fetch_faceit_enrichment(client: FaceitClient, faceit_player_id: str) 
     if recent:
         recent_items = recent.get("items") or []
 
+    try:
+        history = await client.get_match_history(faceit_player_id, limit=50)
+        history_items = history.get("items") or []
+    except Exception as exc:
+        logger.warning("FACEIT match history failed for %s: %s", faceit_player_id, exc)
+
     bans_resp = await client.get_player_bans(faceit_player_id)
     if bans_resp:
         bans = bans_resp.get("items") or []
 
     lifetime = _normalize_faceit_lifetime(lifetime_raw)
     recent_block = _aggregate_faceit_recent(recent_items)
+    activity = _build_faceit_activity(
+        history_items,
+        recent_items,
+        lifetime_matches=lifetime.get("matches"),
+    )
     return {
         "lifetime": lifetime,
         "recent_20": recent_block,
+        "activity": activity,
         "bans": [
             {
                 "type": b.get("type"),
@@ -162,7 +317,7 @@ async def _fetch_faceit_enrichment(client: FaceitClient, faceit_player_id: str) 
             }
             for b in bans
         ],
-        "flags": _compute_faceit_flags(lifetime, recent_block, bans),
+        "flags": _compute_faceit_flags(lifetime, recent_block, bans, activity),
     }
 
 

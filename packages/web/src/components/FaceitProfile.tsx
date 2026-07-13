@@ -1,3 +1,4 @@
+import { FaceitActivity, FaceitActivityTimeline } from "@/components/FaceitActivityTimeline";
 import { countryFlag, countryLabel } from "@/lib/country";
 
 export interface FaceitStatBlock {
@@ -39,6 +40,7 @@ export interface FaceitProfileStats {
   skill_level?: number;
   lifetime?: FaceitStatBlock;
   recent_20?: FaceitStatBlock;
+  activity?: FaceitActivity;
   bans?: FaceitBan[];
   flags?: FaceitFlag[];
 }
@@ -213,6 +215,15 @@ export function FaceitProfile({ faceit }: { faceit: FaceitProfileStats }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {faceit.activity && (
+        <div style={{ marginBottom: "1.25rem" }}>
+          <h3 style={{ fontSize: "0.95rem", marginBottom: "0.75rem", color: "var(--muted)" }}>
+            Activity timeline
+          </h3>
+          <FaceitActivityTimeline activity={faceit.activity} />
         </div>
       )}
 

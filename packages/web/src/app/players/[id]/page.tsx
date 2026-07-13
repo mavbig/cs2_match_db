@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FaceitProfile, FaceitProfileStats } from "@/components/FaceitProfile";
+import { MatchSourceBadge } from "@/components/MatchSourceBadge";
 import { PlayerProfileLinks } from "@/components/PlayerProfileLinks";
 import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore, PlayerMatch } from "@/lib/api";
 
@@ -163,9 +164,9 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
                   <td>{m.deaths ?? "—"}</td>
                   <td>{m.headshot_pct != null ? `${Math.round(m.headshot_pct)}%` : "—"}</td>
                   <td style={{ color: "var(--muted)", fontSize: "0.85rem" }}>{formatDate(m.played_at)}</td>
-                  <td>
-                    <span className="badge">{m.source}</span>
-                  </td>
+                    <td>
+                      <MatchSourceBadge source={m.source} />
+                    </td>
                 </tr>
               ))}
             </tbody>

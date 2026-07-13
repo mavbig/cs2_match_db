@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { MatchPagination } from "@/components/MatchPagination";
+import { MatchSourceBadge } from "@/components/MatchSourceBadge";
 import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore, MatchSummary } from "@/lib/api";
 
 const PAGE_SIZE = 25;
@@ -58,7 +59,7 @@ export default async function MatchesPage({
                     <td>{formatMatchScore(m.source, m.score_team_a, m.score_team_b)}</td>
                     <td style={{ color: "var(--muted)", fontSize: "0.85rem" }}>{formatDate(m.played_at)}</td>
                     <td>
-                      <span className="badge">{m.source}</span>
+                      <MatchSourceBadge source={m.source} />
                     </td>
                   </tr>
                 ))}

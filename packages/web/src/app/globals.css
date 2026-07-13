@@ -529,6 +529,18 @@ textarea.input {
   color: var(--danger);
 }
 
+.match-source-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+.match-source-icon {
+  display: block;
+  object-fit: contain;
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MatchSourceBadge } from "@/components/MatchSourceBadge";
 import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore } from "@/lib/api";
 
 export default async function DashboardPage() {
@@ -81,8 +82,8 @@ export default async function DashboardPage() {
                   <tr key={m.id}>
                     <td>
                       <Link href={`/matches/${m.id}`}>{formatMatchLabel(m)}</Link>
-                      <span className="badge badge-blue" style={{ marginLeft: "0.5rem" }}>
-                        {m.source}
+                      <span style={{ marginLeft: "0.5rem", verticalAlign: "middle" }}>
+                        <MatchSourceBadge source={m.source} size={18} />
                       </span>
                     </td>
                     <td>{formatMap(m.map)}</td>

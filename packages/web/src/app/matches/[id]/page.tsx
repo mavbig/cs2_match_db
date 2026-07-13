@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { MatchActions } from "@/components/MatchActions";
 import { MatchDebugPanel } from "@/components/MatchDebugPanel";
 import { MatchScoreboard } from "@/components/MatchScoreboard";
+import { MatchSourceBadge } from "@/components/MatchSourceBadge";
 import { api, formatDate, formatMap, formatMatchScore } from "@/lib/api";
 
 export default async function MatchDetailPage({
@@ -55,7 +56,7 @@ export default async function MatchDetailPage({
           <span>Match #{match.source_match_id.slice(-8)}</span>
           <span>{formatDate(match.played_at)}</span>
           <span>Score: {formatMatchScore(match.source, match.score_team_a, match.score_team_b)}</span>
-          <span className="badge">{match.source}</span>
+          <MatchSourceBadge source={match.source} size={24} />
           {match.mode && <span className="badge badge-orange">{match.mode}</span>}
           {match.source === "steam_gc" && (
             <Link href={showDebug ? `/matches/${id}` : `/matches/${id}?debug=1`} className="btn btn-ghost" style={{ padding: "0.25rem 0.6rem", fontSize: "0.8rem" }}>

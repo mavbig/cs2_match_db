@@ -219,7 +219,7 @@ export default function SettingsPage() {
             Trigger Steam Sync
           </button>
           <button type="button" className="btn" onClick={() => triggerSync("faceit")}>
-            Sync FACEIT (up to 2000)
+            Sync FACEIT (may take 30+ min)
           </button>
           <button type="button" className="btn" onClick={() => triggerSync("enrichment")}>
             Trigger Enrichment

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -7,6 +8,7 @@ from uuid import UUID
 import httpx
 from arq import cron
 from arq.connections import RedisSettings
+from arq.worker import func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from config import settings
@@ -18,6 +20,9 @@ engine = create_async_engine(settings.database_url)
 Session = async_sessionmaker(engine, expire_on_commit=False)
 
 FACEIT_BASE = "https://open.faceit.com/data/v4"
+FACEIT_REQUEST_TIMEOUT_S = 15.0
+FACEIT_MATCH_DELAY_S = 0.2
+FACEIT_COMMIT_EVERY = 10
 
 
 async def _get_setting(session: AsyncSession, key: str) -> str | None:
@@ -300,6 +305,24 @@ async def _faceit_headers(session: AsyncSession) -> dict:
     return {"Authorization": f"Bearer {faceit_key}"}
 
 
+async def _faceit_get(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    *,
+    params: dict | None = None,
+    timeout: float = FACEIT_REQUEST_TIMEOUT_S,
+) -> httpx.Response | None:
+    try:
+        return await asyncio.wait_for(
+            client.get(url, headers=headers, params=params),
+            timeout=timeout,
+        )
+    except (asyncio.TimeoutError, httpx.TimeoutException):
+        logger.warning("FACEIT request timed out after %.0fs: %s", timeout, url)
+        return None
+
+
 async def _resolve_steam64(
     client: httpx.AsyncClient,
     headers: dict,
@@ -309,8 +332,8 @@ async def _resolve_steam64(
     if faceit_player_id in cache:
         return cache[faceit_player_id]
 
-    resp = await client.get(f"{FACEIT_BASE}/players/{faceit_player_id}", headers=headers)
-    if resp.status_code != 200:
+    resp = await _faceit_get(client, f"{FACEIT_BASE}/players/{faceit_player_id}", headers, timeout=10.0)
+    if resp is None or resp.status_code != 200:
         cache[faceit_player_id] = None
         return None
 
@@ -507,13 +530,13 @@ async def _import_faceit_match(
 ) -> bool:
     from sqlalchemy import text
 
-    detail_resp = await client.get(f"{FACEIT_BASE}/matches/{match_id}", headers=headers)
-    if detail_resp.status_code != 200:
-        logger.warning("FACEIT match detail failed for %s: %s", match_id, detail_resp.status_code)
+    detail_resp = await _faceit_get(client, f"{FACEIT_BASE}/matches/{match_id}", headers)
+    if detail_resp is None or detail_resp.status_code != 200:
+        logger.warning("FACEIT match detail failed for %s", match_id)
         return False
 
-    stats_resp = await client.get(f"{FACEIT_BASE}/matches/{match_id}/stats", headers=headers)
-    stats = stats_resp.json() if stats_resp.status_code == 200 else {}
+    stats_resp = await _faceit_get(client, f"{FACEIT_BASE}/matches/{match_id}/stats", headers)
+    stats = stats_resp.json() if stats_resp is not None and stats_resp.status_code == 200 else {}
 
     detail = detail_resp.json()
     map_name = _extract_map(detail, stats)
@@ -647,21 +670,28 @@ async def sync_faceit_matches(ctx):
         )
         job_id = str(job_result.fetchone()[0])
         imported = 0
+        failed = 0
+        processed = 0
         headers = await _faceit_headers(session)
         player_cache: dict[str, str | None] = {}
+        max_matches = settings.faceit_sync_max_matches
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(
+            timeout = httpx.Timeout(connect=10.0, read=FACEIT_REQUEST_TIMEOUT_S, write=10.0, pool=10.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await _faceit_get(
+                    client,
                     f"{FACEIT_BASE}/players",
+                    headers,
                     params={"nickname": faceit_nick},
-                    headers=headers,
+                    timeout=20.0,
                 )
+                if resp is None:
+                    raise RuntimeError("FACEIT player lookup timed out")
                 resp.raise_for_status()
                 player = resp.json()
 
                 offset = 0
-                max_matches = 2000
                 while offset < max_matches:
                     hist_resp = await client.get(
                         f"{FACEIT_BASE}/players/{player['player_id']}/history",
@@ -680,11 +710,36 @@ async def sync_faceit_matches(ctx):
                         if not match_id:
                             continue
 
-                        ok = await _import_faceit_match(
-                            session, client, headers, match_id, item, my_steam64, player_cache
-                        )
-                        if ok:
-                            imported += 1
+                        processed += 1
+                        try:
+                            ok = await _import_faceit_match(
+                                session, client, headers, match_id, item, my_steam64, player_cache
+                            )
+                            if ok:
+                                imported += 1
+                            else:
+                                failed += 1
+                        except Exception:
+                            failed += 1
+                            logger.exception("FACEIT import failed for match %s", match_id)
+
+                        if processed % FACEIT_COMMIT_EVERY == 0:
+                            await session.execute(
+                                text(
+                                    "UPDATE sync_jobs SET matches_imported = :n WHERE id = :id"
+                                ),
+                                {"n": imported, "id": job_id},
+                            )
+                            await session.commit()
+                            logger.info(
+                                "FACEIT sync progress: %d imported, %d failed, %d processed",
+                                imported,
+                                failed,
+                                processed,
+                            )
+
+                        if FACEIT_MATCH_DELAY_S > 0:
+                            await asyncio.sleep(FACEIT_MATCH_DELAY_S)
 
                     offset += 20
                     if len(items) < 20:
@@ -697,16 +752,22 @@ async def sync_faceit_matches(ctx):
                 {"now": datetime.now(timezone.utc), "n": imported, "id": job_id},
             )
             await session.commit()
-            logger.info("FACEIT sync complete: %d matches", imported)
+            logger.info(
+                "FACEIT sync complete: %d imported, %d failed, %d processed",
+                imported,
+                failed,
+                processed,
+            )
         except Exception as e:
             await session.execute(
                 text(
-                    "UPDATE sync_jobs SET status = 'failed', finished_at = :now, error_message = :err WHERE id = :id"
+                    "UPDATE sync_jobs SET status = 'failed', finished_at = :now, "
+                    "matches_imported = :n, error_message = :err WHERE id = :id"
                 ),
-                {"now": datetime.now(timezone.utc), "err": str(e), "id": job_id},
+                {"now": datetime.now(timezone.utc), "n": imported, "err": str(e)[:500], "id": job_id},
             )
             await session.commit()
-            logger.exception("FACEIT sync failed")
+            logger.exception("FACEIT sync failed after %d imports", imported)
 
 
 async def process_enrichment_jobs(ctx):
@@ -808,13 +869,14 @@ async def import_leetify_profile(ctx):
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    job_timeout = 7200
     functions = [
         enrich_player,
-        sync_faceit_matches,
+        func(sync_faceit_matches, timeout=7200),
         process_enrichment_jobs,
         run_enrichment_batch,
-        sync_leetify_matches,
-        import_leetify_profile,
+        func(sync_leetify_matches, timeout=1800),
+        func(import_leetify_profile, timeout=7200),
     ]
     cron_jobs = [
         cron(sync_faceit_matches, hour={0, 6, 12, 18}, minute=0),

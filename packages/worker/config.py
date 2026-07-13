@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     leetify_api_key: str = ""
     my_steam64_id: str = ""
     api_internal_url: str = "http://api:8000"
+    faceit_sync_max_matches: int = 2000
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

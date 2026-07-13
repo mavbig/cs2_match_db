@@ -62,6 +62,7 @@ class MatchPlayerOut(BaseModel):
     score: int | None
     ping: int | None
     is_me: bool
+    times_played_with_me: int | None = None
 
     model_config = {"from_attributes": True}
 

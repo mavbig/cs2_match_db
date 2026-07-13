@@ -92,6 +92,7 @@ export interface MatchPlayer {
   score: number | null;
   ping: number | null;
   is_me: boolean;
+  times_played_with_me: number | null;
 }
 
 export interface MatchSyncStatus {

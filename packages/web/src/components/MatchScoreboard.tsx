@@ -29,11 +29,9 @@ function outcomeClass(outcome: TeamOutcome): string {
 
 function PlayerTable({
   players,
-  showPing,
   teamClass,
 }: {
   players: MatchPlayer[];
-  showPing: boolean;
   teamClass: "team-a" | "team-b";
 }) {
   const sorted = sortPlayers(players);
@@ -43,7 +41,7 @@ function PlayerTable({
       <thead>
         <tr>
           <th>Player</th>
-          {showPing && <th>Ping</th>}
+          <th title="Have you played with this player before?">With you</th>
           <th>K</th>
           <th>A</th>
           <th>D</th>
@@ -65,7 +63,17 @@ function PlayerTable({
                 )}
               </Link>
             </td>
-            {showPing && <td>{p.ping ?? "—"}</td>}
+            <td style={{ textAlign: "center" }}>
+              {p.is_me ? (
+                "—"
+              ) : (p.times_played_with_me ?? 0) > 0 ? (
+                <span className="badge" title={`${p.times_played_with_me} matches with you`}>
+                  ✓
+                </span>
+              ) : (
+                "—"
+              )}
+            </td>
             <td>{p.kills ?? "—"}</td>
             <td>{p.assists ?? "—"}</td>
             <td>{p.deaths ?? "—"}</td>
@@ -91,7 +99,6 @@ export function MatchScoreboard({ players, scoreTeamA, scoreTeamB, source, isFac
   const teamA = players.filter((p) => p.team === "team_a");
   const teamB = players.filter((p) => p.team === "team_b");
   const hasTeams = teamA.length > 0 && teamB.length > 0;
-  const showPing = !isFaceit || players.some((p) => p.ping != null);
 
   const myTeam = players.find((p) => p.is_me)?.team;
   const teamLabel = (team: "team_a" | "team_b") => {
@@ -108,12 +115,7 @@ export function MatchScoreboard({ players, scoreTeamA, scoreTeamB, source, isFac
     return (
       <div className="card">
         <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Scoreboard</h2>
-        {isFaceit && !showPing && (
-          <p className="scoreboard-note">
-            FACEIT&apos;s open API does not include per-player ping. Score is estimated from K/A/MVP when not provided.
-          </p>
-        )}
-        <PlayerTable players={sorted} showPing={showPing} teamClass="team-a" />
+        <PlayerTable players={sorted} teamClass="team-a" />
       </div>
     );
   }
@@ -128,25 +130,20 @@ export function MatchScoreboard({ players, scoreTeamA, scoreTeamB, source, isFac
   return (
     <div className="card">
       <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Scoreboard</h2>
-      {isFaceit && !showPing && (
-        <p className="scoreboard-note">
-          FACEIT&apos;s open API does not include per-player ping. Score is estimated from K/A/MVP when not provided.
-        </p>
-      )}
       <div className="scoreboard-grid">
         <div className={`team-panel team-a ${outcomeClass(outcomeA)}`}>
           <div className={`team-header team-a ${outcomeClass(outcomeA)}`}>
             <span>{teamLabel("team_a")}</span>
             {scoreTeamA != null && <span className="team-score">{scoreTeamA}</span>}
           </div>
-          <PlayerTable players={teamA} showPing={showPing} teamClass="team-a" />
+          <PlayerTable players={teamA} teamClass="team-a" />
         </div>
         <div className={`team-panel team-b ${outcomeClass(outcomeB)}`}>
           <div className={`team-header team-b ${outcomeClass(outcomeB)}`}>
             <span>{teamLabel("team_b")}</span>
             {scoreTeamB != null && <span className="team-score">{scoreTeamB}</span>}
           </div>
-          <PlayerTable players={teamB} showPing={showPing} teamClass="team-b" />
+          <PlayerTable players={teamB} teamClass="team-b" />
         </div>
       </div>
       {scoreLabel && (

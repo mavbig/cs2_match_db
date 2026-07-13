@@ -95,6 +95,7 @@ def _match_to_out(match: Match) -> MatchOut:
                 score=mp.score,
                 ping=mp.ping,
                 is_me=mp.is_me,
+                times_played_with_me=None,
             )
         )
     return MatchOut(
@@ -264,7 +265,44 @@ async def get_match(match_id: UUID, db: AsyncSession = Depends(get_db)):
     match = await get_match_with_players(db, match_id)
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
-    return _match_to_out(match)
+    out = _match_to_out(match)
+
+    me = next((p for p in match.players if p.is_me), None)
+    if not me:
+        return out
+
+    other_player_ids = [mp.player_id for mp in match.players if not mp.is_me]
+    if not other_player_ids:
+        return out
+
+    shared_match_ids = (
+        select(MatchPlayer.match_id)
+        .where(
+            MatchPlayer.player_id == me.player_id,
+            MatchPlayer.is_me.is_(True),
+        )
+        .subquery()
+    )
+
+    rows = await db.execute(
+        select(
+            MatchPlayer.player_id,
+            func.count(func.distinct(MatchPlayer.match_id)).label("times"),
+        )
+        .select_from(MatchPlayer)
+        .where(
+            MatchPlayer.player_id.in_(other_player_ids),
+            MatchPlayer.match_id.in_(select(shared_match_ids.c.match_id)),
+        )
+        .group_by(MatchPlayer.player_id)
+    )
+    times_by_player = {pid: int(times or 0) for pid, times in rows.all()}
+
+    out.players = [
+        p.model_copy(update={"times_played_with_me": times_by_player.get(p.player_id) if not p.is_me else None})
+        for p in out.players
+    ]
+    return out
 
 
 @router.get("/players", response_model=SearchResultOut)

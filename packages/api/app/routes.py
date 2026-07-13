@@ -506,6 +506,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
     faceit_key = await get_setting(db, "faceit_api_key") or settings.faceit_api_key
     faceit_nick = await get_setting(db, "faceit_nickname") or settings.faceit_nickname
     leetify_key = await get_setting(db, "leetify_api_key") or settings.leetify_api_key
+    leetify_session = await get_setting(db, "leetify_session_token") or settings.leetify_session_token
     my_id = await get_my_steam64_id(db)
 
     onboarding = bool(my_id and auth and share)
@@ -517,6 +518,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         faceit_api_key_set=bool(faceit_key),
         faceit_nickname=faceit_nick or None,
         leetify_api_key_set=bool(leetify_key),
+        leetify_session_token_set=bool(leetify_session),
         onboarding_complete=onboarding,
     )
 
@@ -537,6 +539,8 @@ async def update_settings(body: SettingsUpdateIn, db: AsyncSession = Depends(get
         await set_setting(db, "faceit_nickname", body.faceit_nickname)
     if body.leetify_api_key is not None:
         await set_setting(db, "leetify_api_key", body.leetify_api_key)
+    if body.leetify_session_token is not None:
+        await set_setting(db, "leetify_session_token", body.leetify_session_token)
     return await get_settings(db)
 
 
@@ -572,11 +576,12 @@ async def import_leetify(db: AsyncSession = Depends(get_db)):
     if not my_steam64:
         raise HTTPException(status_code=400, detail="Configure your Steam64 ID in settings first")
     leetify_key = await get_setting(db, "leetify_api_key") or settings.leetify_api_key
+    leetify_session = await get_setting(db, "leetify_session_token") or settings.leetify_session_token
     if not leetify_key:
         raise HTTPException(status_code=400, detail="Leetify API key not configured")
 
     logger.info("Starting Leetify profile import for %s", my_steam64)
-    result = await import_leetify_profile(db, my_steam64, leetify_key)
+    result = await import_leetify_profile(db, my_steam64, leetify_key, session_token=leetify_session)
     await db.commit()
     logger.info("Leetify profile import API finished: %s", result)
     return result

@@ -20,8 +20,9 @@ class LeetifyClient:
     PUBLIC_BASE = "https://api-public.cs-prod.leetify.com"
     INTERNAL_BASE = "https://api.cs-prod.leetify.com"
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, session_token: str | None = None):
         self.api_key = api_key or settings.leetify_api_key
+        self.session_token = session_token
 
     def _headers(self) -> dict:
         if not self.api_key:
@@ -31,18 +32,28 @@ class LeetifyClient:
             "_leetify_key": self.api_key,
         }
 
+    def _internal_headers(self) -> dict:
+        if self.session_token:
+            token = self.session_token.strip()
+            if token.lower().startswith("bearer "):
+                return {"Authorization": token}
+            return {"Authorization": f"Bearer {token}"}
+        return self._headers()
+
     async def _request_json(
         self,
         base: str,
         path: str,
         *,
         params: dict | None = None,
+        internal: bool = False,
     ) -> tuple[dict | list | None, int, str | None]:
+        headers = self._internal_headers() if internal else self._headers()
         async with httpx.AsyncClient(timeout=90) as client:
             resp = await client.get(
                 f"{base}{path}",
                 params=params,
-                headers=self._headers(),
+                headers=headers,
             )
             if resp.status_code in (404, 401, 403):
                 return None, resp.status_code, (resp.text or "")[:200] or None
@@ -58,7 +69,7 @@ class LeetifyClient:
         return await self._request_json(self.PUBLIC_BASE, path, params=params)
 
     async def _get_internal_json(self, path: str, *, params: dict | None = None):
-        return await self._request_json(self.INTERNAL_BASE, path, params=params)
+        return await self._request_json(self.INTERNAL_BASE, path, params=params, internal=True)
 
     async def get_profile(self, steam64_id: str) -> dict | None:
         data, _, _ = await self._get_public_json("/v3/profile", params={"steam64_id": steam64_id})
@@ -119,7 +130,14 @@ class LeetifyClient:
         )
         if data is None:
             if status in (401, 403):
-                logger.info("Leetify games/history not available with API key (HTTP %s)", status)
+                if not self.session_token:
+                    logger.info(
+                        "Leetify games/history requires a browser session token (HTTP %s). "
+                        "Add it in Settings.",
+                        status,
+                    )
+                else:
+                    logger.warning("Leetify games/history rejected session token (HTTP %s)", status)
             elif status >= 500:
                 logger.warning("Leetify games/history failed: %s", err)
             return None
@@ -143,7 +161,11 @@ class LeetifyClient:
             windows += 1
             if page is None:
                 if not collected:
-                    return [], {"history_available": False, "history_windows": windows}
+                    return [], {
+                        "history_available": False,
+                        "history_windows": windows,
+                        "history_auth_required": not bool(self.session_token),
+                    }
                 break
             if not page:
                 if windows == 1:
@@ -202,6 +224,7 @@ class LeetifyClient:
         offset = 0
         collected: list[dict] = []
         seen_ids: set[str] = set()
+        history_auth_required = history_meta.get("history_auth_required", False)
 
         def absorb(page: list[dict]) -> int:
             added = 0
@@ -267,6 +290,7 @@ class LeetifyClient:
             "leetify_user_id": leetify_id,
             "fetched": len(collected),
             "import_source": "profile_matches",
+            "history_auth_required": history_auth_required,
         }
         if total_on_profile and len(collected) < total_on_profile:
             meta["api_limit_note"] = (

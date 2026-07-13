@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     faceit_api_key: str = ""
     faceit_nickname: str = ""
     leetify_api_key: str = ""
+    leetify_session_token: str = ""
     steam_auth_code: str = ""
     steam_oldest_share_code: str = ""
 

@@ -171,6 +171,7 @@ export interface Settings {
   faceit_api_key_set: boolean;
   faceit_nickname: string | null;
   leetify_api_key_set: boolean;
+  leetify_session_token_set: boolean;
   onboarding_complete: boolean;
 }
 

@@ -41,6 +41,7 @@ export default function SettingsPage() {
     faceit_api_key: "",
     faceit_nickname: "",
     leetify_api_key: "",
+    leetify_session_token: "",
   });
   const [shareCode, setShareCode] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -63,6 +64,7 @@ export default function SettingsPage() {
       if (form.faceit_api_key) payload.faceit_api_key = form.faceit_api_key;
       if (form.faceit_nickname) payload.faceit_nickname = form.faceit_nickname;
       if (form.leetify_api_key) payload.leetify_api_key = form.leetify_api_key;
+      if (form.leetify_session_token) payload.leetify_session_token = form.leetify_session_token;
 
       const updated = await api.updateSettings(payload);
       setSettings(updated);
@@ -256,7 +258,7 @@ export default function SettingsPage() {
 
           <label>
             <div style={{ marginBottom: "0.35rem", fontSize: "0.85rem", color: "var(--muted)" }}>
-              Leetify API Key (optional) {settings?.leetify_api_key_set && <span className="badge badge-green">set</span>}
+              Leetify API Key {settings?.leetify_api_key_set && <span className="badge badge-green">set</span>}
             </div>
             <input
               className="input"
@@ -265,6 +267,25 @@ export default function SettingsPage() {
               value={form.leetify_api_key}
               onChange={(e) => setForm({ ...form, leetify_api_key: e.target.value })}
             />
+          </label>
+
+          <label>
+            <div style={{ marginBottom: "0.35rem", fontSize: "0.85rem", color: "var(--muted)" }}>
+              Leetify Session Token (full history){" "}
+              {settings?.leetify_session_token_set && <span className="badge badge-green">set</span>}
+            </div>
+            <input
+              className="input"
+              type="password"
+              placeholder="Paste Bearer token from browser DevTools"
+              value={form.leetify_session_token}
+              onChange={(e) => setForm({ ...form, leetify_session_token: e.target.value })}
+            />
+            <p style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: "0.35rem", lineHeight: 1.5 }}>
+              Required for importing all matches. On leetify.com: DevTools → Network → click a{" "}
+              <code>games/history</code> request → copy the <code>Authorization</code> header value (the JWT after
+              &quot;Bearer &quot;).
+            </p>
           </label>
         </div>
 
@@ -293,9 +314,8 @@ export default function SettingsPage() {
           </button>
         </div>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
-          Leetify import walks your full Leetify history (same API the website uses) in 6-month chunks,
-          then fetches full match details. Steam sync only reaches back to your oldest share code.
-          Large imports can take 30+ minutes.
+          Leetify import uses the website history API (6-month chunks). You need both an API key and a session token
+          for full history — without the token only ~100 recent matches import. Large imports can take 30+ minutes.
         </p>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>

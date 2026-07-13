@@ -507,10 +507,16 @@ async def create_match_from_leetify(db: AsyncSession, leetify_data: dict, my_ste
     return match
 
 
-async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str) -> dict:
+async def import_leetify_profile(
+    db: AsyncSession,
+    steam64_id: str,
+    api_key: str,
+    *,
+    session_token: str | None = None,
+) -> dict:
     from sqlalchemy import text
 
-    client = LeetifyClient(api_key)
+    client = LeetifyClient(api_key, session_token=session_token)
     logger.info("Leetify import: fetching match history for %s", steam64_id)
     entries, meta = await client.get_all_profile_matches(steam64_id)
     if not entries:
@@ -613,6 +619,11 @@ async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str
     ]
     if meta.get("api_limit_note"):
         message_parts.append(str(meta["api_limit_note"]))
+    if meta.get("history_auth_required"):
+        message_parts.append(
+            "Full Leetify history needs a browser session token — add it in Settings "
+            "(DevTools → Network → games/history → copy Authorization header)."
+        )
     if imported == 0 and updated > 0:
         message_parts.append(
             "All recent Leetify matches were already in your database — stats were refreshed."

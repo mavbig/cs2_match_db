@@ -163,6 +163,7 @@ class SettingsUpdateIn(BaseModel):
     faceit_api_key: str | None = None
     faceit_nickname: str | None = None
     leetify_api_key: str | None = None
+    leetify_session_token: str | None = None
 
 
 class SettingsOut(BaseModel):
@@ -173,6 +174,7 @@ class SettingsOut(BaseModel):
     faceit_api_key_set: bool = False
     faceit_nickname: str | None = None
     leetify_api_key_set: bool = False
+    leetify_session_token_set: bool = False
     onboarding_complete: bool = False
 
 

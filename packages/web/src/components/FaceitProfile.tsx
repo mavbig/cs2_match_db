@@ -1,5 +1,6 @@
 import { FaceitActivity, FaceitActivityTimeline } from "@/components/FaceitActivityTimeline";
 import { CountryBadge } from "@/components/CountryFlag";
+import { FaceitSkillBadge } from "@/components/FaceitSkillBadge";
 
 export interface FaceitStatBlock {
   matches?: number | null;
@@ -128,18 +129,21 @@ export function FaceitProfile({ faceit }: { faceit: FaceitProfileStats }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem", marginBottom: "1rem" }}>
         <div>
           <h2 style={{ fontSize: "1.1rem" }}>FACEIT CS2</h2>
-          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.35rem", flexWrap: "wrap" }}>
-            {faceit.profile_url ? (
-              <a href={faceit.profile_url} target="_blank" rel="noopener noreferrer">
-                {faceit.nickname ?? "Profile"}
-              </a>
-            ) : (
-              faceit.nickname
-            )}
-            {faceit.skill_level != null && <span className="badge badge-blue">Lvl {faceit.skill_level}</span>}
-            {faceit.elo != null && <span className="badge">{faceit.elo} ELO</span>}
-            {faceit.verified && <span className="badge badge-green">Verified</span>}
-            {faceit.country && <CountryBadge code={faceit.country} />}
+          <div className="faceit-profile-meta">
+            <div className="faceit-profile-identity">
+              {faceit.profile_url ? (
+                <a href={faceit.profile_url} target="_blank" rel="noopener noreferrer" className="faceit-profile-name">
+                  {faceit.nickname ?? "Profile"}
+                </a>
+              ) : (
+                <span className="faceit-profile-name">{faceit.nickname}</span>
+              )}
+              {faceit.verified && <span className="badge badge-green">Verified</span>}
+            </div>
+            <div className="faceit-profile-tags">
+              <FaceitSkillBadge level={faceit.skill_level} elo={faceit.elo} />
+              {faceit.country && <CountryBadge code={faceit.country} />}
+            </div>
           </div>
         </div>
       </div>

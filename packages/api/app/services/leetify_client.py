@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -23,6 +25,17 @@ class LeetifyClient:
     def __init__(self, api_key: str | None = None, session_token: str | None = None):
         self.api_key = api_key or settings.leetify_api_key
         self.session_token = session_token
+        self._last_request_at = 0.0
+        self._profile_matches_cache: list[dict] | None = None
+
+    @property
+    def _min_delay_s(self) -> float:
+        return max(settings.leetify_request_delay_ms, 100) / 1000.0
+
+    async def _throttle(self) -> None:
+        elapsed = time.monotonic() - self._last_request_at
+        if elapsed < self._min_delay_s:
+            await asyncio.sleep(self._min_delay_s - elapsed)
 
     def _headers(self) -> dict:
         if not self.api_key:
@@ -33,12 +46,24 @@ class LeetifyClient:
         }
 
     def _internal_headers(self) -> dict:
-        if self.session_token:
-            token = self.session_token.strip()
-            if token.lower().startswith("bearer "):
-                return {"Authorization": token}
-            return {"Authorization": f"Bearer {token}"}
-        return self._headers()
+        headers = {
+            "Accept": "application/json",
+            "Origin": "https://leetify.com",
+            "Referer": "https://leetify.com/",
+        }
+        if not self.session_token:
+            return headers
+
+        token = self.session_token.strip()
+        if "=" in token and not token.lower().startswith("bearer "):
+            headers["Cookie"] = token
+            return headers
+
+        if token.lower().startswith("bearer "):
+            headers["Authorization"] = token
+        else:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     async def _request_json(
         self,
@@ -49,12 +74,23 @@ class LeetifyClient:
         internal: bool = False,
     ) -> tuple[dict | list | None, int, str | None]:
         headers = self._internal_headers() if internal else self._headers()
-        async with httpx.AsyncClient(timeout=90) as client:
-            resp = await client.get(
-                f"{base}{path}",
-                params=params,
-                headers=headers,
-            )
+
+        for attempt in range(4):
+            await self._throttle()
+            async with httpx.AsyncClient(timeout=90) as client:
+                resp = await client.get(
+                    f"{base}{path}",
+                    params=params,
+                    headers=headers,
+                )
+            self._last_request_at = time.monotonic()
+
+            if resp.status_code == 429:
+                wait_s = min(30.0, 2.0 ** attempt)
+                logger.warning("Leetify rate limited on %s — waiting %.0fs", path, wait_s)
+                await asyncio.sleep(wait_s)
+                continue
+
             if resp.status_code in (404, 401, 403):
                 return None, resp.status_code, (resp.text or "")[:200] or None
             if resp.status_code >= 500:
@@ -64,6 +100,8 @@ class LeetifyClient:
             if resp.status_code >= 400:
                 return None, resp.status_code, resp.text[:200] if resp.text else None
             return resp.json(), resp.status_code, None
+
+        return None, 429, "rate limited"
 
     async def _get_public_json(self, path: str, *, params: dict | None = None):
         return await self._request_json(self.PUBLIC_BASE, path, params=params)
@@ -103,20 +141,15 @@ class LeetifyClient:
 
         data, status, err = await self._get_public_json("/v3/profile/matches", params=params)
         if data is None:
-            if status >= 500:
+            if status == 429:
+                logger.warning("Leetify profile/matches rate limited for %s", steam64_id)
+            elif status >= 500:
                 logger.warning("Leetify profile/matches failed for %s: %s", steam64_id, err)
             return None
 
-        page = self._parse_matches_response(data)
-        if not page and isinstance(data, dict):
-            logger.warning(
-                "Leetify profile/matches returned empty list for %s (keys=%s)",
-                steam64_id,
-                list(data.keys()),
-            )
-        return page
+        return self._parse_matches_response(data)
 
-    async def get_games_history(self, start: datetime, end: datetime) -> list[dict] | None:
+    async def get_games_history(self, start: datetime, end: datetime) -> tuple[list[dict] | None, int | None]:
         filters = {
             "currentPeriod": {
                 "start": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
@@ -138,39 +171,41 @@ class LeetifyClient:
                     )
                 else:
                     logger.warning("Leetify games/history rejected session token (HTTP %s)", status)
+            elif status == 429:
+                logger.warning("Leetify games/history rate limited")
             elif status >= 500:
                 logger.warning("Leetify games/history failed: %s", err)
-            return None
-        return self._parse_matches_response(data)
+            return None, status
+        return self._parse_matches_response(data), None
 
     async def get_all_games_history(
         self,
         *,
-        chunk_days: int = 180,
-        max_years: int = 10,
+        months_back: int | None = None,
     ) -> tuple[list[dict], dict]:
+        months_back = months_back or settings.leetify_history_months
         collected: list[dict] = []
         seen_ids: set[str] = set()
-        end = datetime.now(timezone.utc)
-        earliest = end - timedelta(days=max_years * 365)
-        windows = 0
+        now = datetime.now(timezone.utc)
+        history_auth_failed = False
 
-        while end > earliest:
-            start = max(earliest, end - timedelta(days=chunk_days))
-            page = await self.get_games_history(start, end)
-            windows += 1
+        for month_index in range(months_back):
+            period_end = now - timedelta(days=30 * month_index)
+            period_start = period_end - timedelta(days=30)
+            page, status = await self.get_games_history(period_start, period_end)
             if page is None:
+                if status in (401, 403):
+                    history_auth_failed = True
                 if not collected:
                     return [], {
                         "history_available": False,
-                        "history_windows": windows,
-                        "history_auth_required": not bool(self.session_token),
+                        "history_windows": month_index + 1,
+                        "history_auth_required": not bool(self.session_token) or history_auth_failed,
+                        "history_auth_failed": history_auth_failed,
                     }
                 break
             if not page:
-                if windows == 1:
-                    return [], {"history_available": True, "history_windows": windows}
-                break
+                continue
 
             added = 0
             for game in page:
@@ -183,119 +218,78 @@ class LeetifyClient:
                 added += 1
 
             logger.info(
-                "Leetify games/history %s..%s: page=%d added=%d total=%d",
-                start.date(),
-                end.date(),
+                "Leetify games/history month -%d: page=%d added=%d total=%d",
+                month_index,
                 len(page),
                 added,
                 len(collected),
             )
 
-            if start <= earliest:
-                break
-            end = start - timedelta(seconds=1)
+        if not collected:
+            return [], {
+                "history_available": bool(self.session_token) and not history_auth_failed,
+                "history_windows": months_back,
+                "history_auth_required": not bool(self.session_token) or history_auth_failed,
+                "history_auth_failed": history_auth_failed,
+            }
 
         return collected, {
             "history_available": True,
-            "history_windows": windows,
+            "history_windows": months_back,
             "fetched": len(collected),
             "import_source": "games_history",
         }
 
     async def get_all_profile_matches(self, steam64_id: str) -> tuple[list[dict], dict]:
-        profile = await self.get_profile(steam64_id)
-        leetify_id = str(profile.get("id")) if profile and profile.get("id") else None
-        total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
-
         history_games, history_meta = await self.get_all_games_history()
         if history_games:
+            profile = await self.get_profile(steam64_id)
+            total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
             meta = {
                 "profile_total_matches": total_on_profile,
-                "leetify_user_id": leetify_id,
+                "leetify_user_id": str(profile.get("id")) if profile and profile.get("id") else None,
                 **history_meta,
             }
             if total_on_profile and len(history_games) < total_on_profile:
                 meta["api_limit_note"] = (
-                    f"Fetched {len(history_games)} of {total_on_profile} Leetify games via history API."
+                    f"Fetched {len(history_games)} of {total_on_profile} Leetify games "
+                    f"via {history_meta.get('history_windows', '?')} monthly history requests."
                 )
             return history_games, meta
 
-        page_size = 100
-        offset = 0
-        collected: list[dict] = []
-        seen_ids: set[str] = set()
-        history_auth_required = history_meta.get("history_auth_required", False)
-
-        def absorb(page: list[dict]) -> int:
-            added = 0
-            for entry in page:
-                entry_id = str(entry.get("id") or "")
-                if entry_id and entry_id in seen_ids:
-                    continue
-                if entry_id:
-                    seen_ids.add(entry_id)
-                collected.append(entry)
-                added += 1
-            return added
-
-        while offset < 50_000:
-            page = await self.get_profile_matches(steam64_id, limit=page_size, offset=offset)
-            if page is None:
-                break
-            if not page:
-                break
-
-            added = absorb(page)
-            logger.info(
-                "Leetify profile/matches offset=%d: page=%d added=%d total=%d",
-                offset,
-                len(page),
-                added,
-                len(collected),
+        if history_meta.get("history_auth_required"):
+            profile = await self.get_profile(steam64_id)
+            total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
+            error_note = (
+                "Session token was rejected — copy a fresh Authorization header from leetify.com."
+                if history_meta.get("history_auth_failed")
+                else None
             )
-            if added == 0 or len(page) < page_size:
-                break
-            offset += page_size
+            return [], {
+                "profile_total_matches": total_on_profile,
+                "history_auth_required": True,
+                "history_auth_failed": history_meta.get("history_auth_failed", False),
+                "import_source": "none",
+                "api_limit_note": error_note,
+            }
 
-        if total_on_profile and len(collected) < total_on_profile and collected:
-            sorted_entries = sorted(
-                collected,
-                key=lambda e: str(e.get("finished_at") or e.get("finishedAt") or ""),
-            )
-            before = sorted_entries[0].get("finished_at") or sorted_entries[0].get("finishedAt")
-            for _ in range(30):
-                if not before:
-                    break
-                page = await self.get_profile_matches(steam64_id, limit=page_size, before=str(before))
-                if not page:
-                    break
-                added = absorb(page)
-                logger.info(
-                    "Leetify profile/matches before=%s: page=%d added=%d total=%d",
-                    before,
-                    len(page),
-                    added,
-                    len(collected),
-                )
-                if added == 0:
-                    break
-                sorted_entries = sorted(
-                    collected,
-                    key=lambda e: str(e.get("finished_at") or e.get("finishedAt") or ""),
-                )
-                before = sorted_entries[0].get("finished_at") or sorted_entries[0].get("finishedAt")
+        profile = await self.get_profile(steam64_id)
+        total_on_profile = int(profile["total_matches"]) if profile and profile.get("total_matches") else None
+
+        page = await self.get_profile_matches(steam64_id, limit=100, offset=0)
+        collected = page or []
 
         meta = {
             "profile_total_matches": total_on_profile,
-            "leetify_user_id": leetify_id,
+            "leetify_user_id": str(profile.get("id")) if profile and profile.get("id") else None,
             "fetched": len(collected),
             "import_source": "profile_matches",
-            "history_auth_required": history_auth_required,
+            "history_auth_required": False,
         }
         if total_on_profile and len(collected) < total_on_profile:
             meta["api_limit_note"] = (
                 f"Leetify public API returned {len(collected)} of {total_on_profile} matches. "
-                "Full history requires the Leetify website session API (games/history)."
+                "Add a session token in Settings for full history."
             )
         return collected, meta
 
@@ -304,6 +298,8 @@ class LeetifyClient:
         data, status, err = await self._get_public_json(f"/v2/matches/{encoded_id}")
         if isinstance(data, dict):
             return data, None
+        if status == 429:
+            return None, "rate limited"
         if status >= 500:
             return None, f"game_id lookup HTTP {status}"
         return None, None
@@ -315,6 +311,8 @@ class LeetifyClient:
         data, status, err = await self._get_public_json(path)
         if isinstance(data, dict):
             return data, None
+        if status == 429:
+            return None, "rate limited"
         if status >= 500:
             return None, f"{data_source} HTTP {status}"
         return None, None
@@ -338,36 +336,6 @@ class LeetifyClient:
                 return data, f"game_id:{leetify_game_id}", notes
             if err:
                 notes.append(err)
-
-        if my_steam64_id:
-            history, _ = await self.get_all_profile_matches(my_steam64_id)
-            if not history:
-                notes.append("profile/matches unavailable")
-            else:
-                entry = _find_history_match(
-                    history,
-                    share_code=share_code,
-                    source_match_id=source_match_id,
-                    played_at=played_at,
-                )
-                if entry:
-                    game_id = entry.get("id")
-                    if game_id:
-                        data, err = await self.get_match_by_game_id(str(game_id))
-                        if data:
-                            return data, f"profile_game_id:{game_id}", notes
-                        if err:
-                            notes.append(err)
-                    if entry.get("stats"):
-                        return entry, "profile_matches", notes
-                    entry_source = entry.get("data_source") or entry.get("dataSource")
-                    entry_id = entry.get("data_source_match_id") or entry.get("dataSourceMatchId")
-                    if entry_source and entry_id:
-                        data, err = await self.get_match_by_source(str(entry_source), str(entry_id))
-                        if data:
-                            return data, f"{entry_source}:{entry_id}", notes
-                        if err:
-                            notes.append(err)
 
         if source == "faceit" and source_match_id:
             data, err = await self.get_match_by_source("faceit", source_match_id)

@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     faceit_nickname: str = ""
     leetify_api_key: str = ""
     leetify_session_token: str = ""
+    leetify_request_delay_ms: int = 500
+    leetify_history_months: int = 36
     steam_auth_code: str = ""
     steam_oldest_share_code: str = ""
 

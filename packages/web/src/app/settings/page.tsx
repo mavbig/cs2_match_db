@@ -282,9 +282,9 @@ export default function SettingsPage() {
               onChange={(e) => setForm({ ...form, leetify_session_token: e.target.value })}
             />
             <p style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: "0.35rem", lineHeight: 1.5 }}>
-              Required for importing all matches. On leetify.com: DevTools → Network → click a{" "}
-              <code>games/history</code> request → copy the <code>Authorization</code> header value (the JWT after
-              &quot;Bearer &quot;).
+              Required for full history (~36 monthly API calls). On leetify.com: DevTools → Network → a{" "}
+              <code>games/history</code> request → Request Headers → copy the full <code>Authorization</code>{" "}
+              value (starts with <code>Bearer eyJ...</code>). Paste the whole string.
             </p>
           </label>
         </div>
@@ -314,8 +314,9 @@ export default function SettingsPage() {
           </button>
         </div>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
-          Leetify import uses the website history API (6-month chunks). You need both an API key and a session token
-          for full history — without the token only ~100 recent matches import. Large imports can take 30+ minutes.
+          Leetify import fetches ~36 months of history (one API call per month), stores match metadata and your stats.
+          Use &quot;Enrich existing matches&quot; separately for full scoreboards and player names. Requires session
+          token + API key.
         </p>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>

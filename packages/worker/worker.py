@@ -871,10 +871,7 @@ async def import_leetify_profile(ctx, sync_job_id: str | None = None):
                 elif result.get("message"):
                     msg = str(result["message"])
                 else:
-                    msg = (
-                        f"{result.get('imported', 0)} new, {result.get('updated', 0)} updated, "
-                        f"{result.get('enriched', 0)} enriched"
-                    )
+                    msg = f"{result.get('imported', 0)} new, {result.get('updated', 0)} updated"
                 logger.info("Leetify profile import: %s", msg)
                 if job_id:
                     async with Session() as session:
@@ -888,7 +885,6 @@ async def import_leetify_profile(ctx, sync_job_id: str | None = None):
                                 "n": (
                                     result.get("imported", 0)
                                     + result.get("updated", 0)
-                                    + result.get("enriched", 0)
                                 ),
                                 "msg": msg,
                                 "id": job_id,

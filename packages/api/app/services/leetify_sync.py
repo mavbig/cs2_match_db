@@ -247,7 +247,13 @@ def _needs_full_leetify_match(data: dict) -> bool:
     return bool(data.get("id")) and len(stats) < 2
 
 
-async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict) -> None:
+async def apply_leetify_match(
+    db: AsyncSession,
+    match: Match,
+    leetify_data: dict,
+    *,
+    skip_player_lookup: bool = False,
+) -> None:
     leetify_data = normalize_leetify_match_data(leetify_data)
     my_steam64 = await get_my_steam64_id(db)
 
@@ -279,6 +285,10 @@ async def apply_leetify_match(db: AsyncSession, match: Match, leetify_data: dict
     match.raw_payload = payload
 
     if not stats:
+        return
+
+    if skip_player_lookup:
+        await db.flush()
         return
 
     has_gc_teams = (
@@ -481,7 +491,13 @@ async def find_match_for_leetify(db: AsyncSession, leetify_data: dict) -> Match 
     return result.scalar_one_or_none()
 
 
-async def create_match_from_leetify(db: AsyncSession, leetify_data: dict, my_steam64: str) -> Match:
+async def create_match_from_leetify(
+    db: AsyncSession,
+    leetify_data: dict,
+    my_steam64: str,
+    *,
+    skip_player_lookup: bool = False,
+) -> Match:
     leetify_data = normalize_leetify_match_data(leetify_data)
     source, source_match_id, share_code, mode = _leetify_match_identity(leetify_data)
     map_name = leetify_data.get("map_name") or leetify_data.get("mapName")
@@ -503,7 +519,7 @@ async def create_match_from_leetify(db: AsyncSession, leetify_data: dict, my_ste
     )
     db.add(match)
     await db.flush()
-    await apply_leetify_match(db, match, leetify_data)
+    await apply_leetify_match(db, match, leetify_data, skip_player_lookup=skip_player_lookup)
     return match
 
 
@@ -514,30 +530,41 @@ async def import_leetify_profile(
     *,
     session_token: str | None = None,
 ) -> dict:
-    from sqlalchemy import text
-
     client = LeetifyClient(api_key, session_token=session_token)
     logger.info("Leetify import: fetching match history for %s", steam64_id)
     entries, meta = await client.get_all_profile_matches(steam64_id)
     if not entries:
         profile_total = meta.get("profile_total_matches")
-        if profile_total:
+        if meta.get("history_auth_required"):
+            if meta.get("history_auth_failed"):
+                error = (
+                    "Leetify rejected your session token (HTTP 401). "
+                    "Log into leetify.com, open DevTools → Network → games/history, "
+                    "and paste the full Authorization header (Bearer eyJ...) into Settings."
+                )
+            else:
+                error = (
+                    "Leetify full history needs a valid session token in Settings. "
+                    "Copy it from DevTools while logged into leetify.com (games/history request → Authorization header)."
+                )
+        elif profile_total:
             error = (
-                f"Leetify profile lists {profile_total} matches but profile/matches returned none. "
-                "This is usually a temporary Leetify API issue — try again in a few minutes."
+                f"Leetify profile lists {profile_total} matches but no history could be fetched. "
+                "Check session token or wait if rate limited (429)."
             )
         else:
-            error = "Could not fetch Leetify profile matches (profile may be private or API unavailable)"
-        logger.warning("Leetify import: profile/matches returned nothing for %s (%s)", steam64_id, error)
+            error = "Could not fetch Leetify match history (check API key, session token, or rate limits)"
+        logger.warning("Leetify import: no matches fetched for %s (%s)", steam64_id, error)
         return {
             "total": 0,
             "imported": 0,
             "updated": 0,
-            "enriched": 0,
             "failed": 0,
             "profile_total_matches": profile_total,
             "error": error,
         }
+
+    use_history_stubs = meta.get("import_source") == "games_history"
 
     logger.info(
         "Leetify import: processing %d matches via %s (profile has %s total on Leetify)",
@@ -552,23 +579,33 @@ async def import_leetify_profile(
     for idx, entry in enumerate(entries, start=1):
         try:
             data = normalize_leetify_match_data(entry)
-            if _needs_full_leetify_match(data):
+            if not use_history_stubs and _needs_full_leetify_match(data):
                 full, _ = await client.get_match_by_game_id(str(data["id"]))
                 if full:
                     data = normalize_leetify_match_data(full)
 
             existing = await find_match_for_leetify(db, data)
             if existing:
-                await apply_leetify_match(db, existing, data)
+                await apply_leetify_match(
+                    db,
+                    existing,
+                    data,
+                    skip_player_lookup=use_history_stubs,
+                )
                 updated += 1
             else:
-                await create_match_from_leetify(db, data, steam64_id)
+                await create_match_from_leetify(
+                    db,
+                    data,
+                    steam64_id,
+                    skip_player_lookup=use_history_stubs,
+                )
                 imported += 1
         except Exception:
             logger.exception("Failed to import Leetify match %s", entry.get("id"))
             failed += 1
 
-        if idx % 25 == 0:
+        if idx % 100 == 0:
             await db.commit()
             logger.info(
                 "Leetify import progress: %d/%d (%d new, %d updated, %d failed)",
@@ -579,47 +616,18 @@ async def import_leetify_profile(
                 failed,
             )
 
-    enriched = 0
-    enrich_failed = 0
-    result = await db.execute(
-        text(
-            """
-            SELECT id FROM matches
-            WHERE share_code IS NOT NULL OR source IN ('faceit', 'steam_gc')
-            ORDER BY played_at DESC NULLS LAST
-            LIMIT 1000
-            """
-        )
-    )
-    match_ids = [row[0] for row in result.fetchall()]
-    logger.info("Leetify import: enriching up to %d existing DB matches", len(match_ids))
-
-    for idx, match_id in enumerate(match_ids, start=1):
-        match = await get_match_with_players(db, match_id)
-        if not match:
-            continue
-        enrichment = (match.raw_payload or {}).get("_enrichment") or {}
-        if enrichment.get("leetify") and enrichment.get("leetify_synced_at"):
-            continue
-        try:
-            sync_result = await sync_match_from_sources(db, match_id)
-            if "leetify" in sync_result.get("sources", []):
-                enriched += 1
-            await db.commit()
-        except Exception:
-            enrich_failed += 1
-            logger.exception("Leetify enrich failed for match %s", match_id)
-
-        if idx % 50 == 0:
-            logger.info("Leetify enrich progress: %d/%d enriched", enriched, idx)
+    await db.commit()
 
     message_parts = [
         f"Import ({meta.get('import_source', 'leetify')}): {imported} new, {updated} updated from {len(entries)} games",
-        f"DB enrich: {enriched} additional matches got Leetify data",
     ]
     if meta.get("api_limit_note"):
         message_parts.append(str(meta["api_limit_note"]))
-    if meta.get("history_auth_required"):
+    if use_history_stubs:
+        message_parts.append(
+            "Player names and full scoreboards were skipped — use Enrich existing matches (Leetify) separately."
+        )
+    elif meta.get("history_auth_required"):
         message_parts.append(
             "Full Leetify history needs a browser session token — add it in Settings "
             "(DevTools → Network → games/history → copy Authorization header)."
@@ -635,8 +643,7 @@ async def import_leetify_profile(
         "total": len(entries),
         "imported": imported,
         "updated": updated,
-        "enriched": enriched,
-        "failed": failed + enrich_failed,
+        "failed": failed,
         "profile_total_matches": meta.get("profile_total_matches"),
         "message": " · ".join(message_parts),
         "api_limit_note": meta.get("api_limit_note"),

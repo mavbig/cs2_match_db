@@ -105,24 +105,153 @@ def _parse_stat_float(value) -> float | None:
     return float(m.group(1)) if m else None
 
 
+def _get_player_stat_substring(player_stats: dict, needle: str):
+    if not player_stats:
+        return None
+    target = needle.lower()
+    for key, value in player_stats.items():
+        if value is None or str(value).strip() == "":
+            continue
+        if target in str(key).lower():
+            return value
+    return None
+
+
+def _normalize_rate_pct(value) -> float | None:
+    parsed = _parse_stat_float(value)
+    if parsed is None:
+        return None
+    if 0 < parsed <= 1:
+        return round(parsed * 100, 2)
+    return parsed
+
+
+def _extract_faceit_kr(stats: dict) -> float | None:
+    value = _get_player_stat(
+        stats,
+        "Average K/R Ratio",
+        "K/R Ratio",
+        "Average KR",
+        "Average K/R",
+        "KPR",
+        "K/R",
+        "Average Kills per Round",
+        "Kills per Round",
+        "Kills Per Round",
+    )
+    if value is None:
+        value = _get_player_stat_substring(stats, "k/r ratio")
+    if value is None:
+        value = _get_player_stat_substring(stats, "kills per round")
+    return _parse_stat_float(value)
+
+
+def _enrich_faceit_stat_block(block: dict) -> dict:
+    matches = block.get("matches") or block.get("match_count")
+    if matches:
+        try:
+            match_count = float(matches)
+        except (TypeError, ValueError):
+            match_count = 0
+    else:
+        match_count = 0
+
+    if match_count > 0:
+        if block.get("avg_kills") is None and block.get("total_kills") is not None:
+            block["avg_kills"] = round(float(block["total_kills"]) / match_count, 2)
+        if block.get("avg_deaths") is None and block.get("total_deaths") is not None:
+            block["avg_deaths"] = round(float(block["total_deaths"]) / match_count, 2)
+        if block.get("avg_assists") is None and block.get("total_assists") is not None:
+            block["avg_assists"] = round(float(block["total_assists"]) / match_count, 2)
+
+    rounds = block.get("rounds")
+    kills = block.get("total_kills")
+    if block.get("kr") is None and kills is not None and rounds:
+        try:
+            round_count = float(rounds)
+            if round_count > 0:
+                block["kr"] = round(float(kills) / round_count, 2)
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
+    for key in ("win_rate_pct", "hs_pct", "entry_success_pct", "kast_pct"):
+        if block.get(key) is not None:
+            block[key] = _normalize_rate_pct(block[key])
+
+    return block
+
+
 def _normalize_faceit_lifetime(lifetime: dict) -> dict:
-    return {
-        "matches": _parse_stat_int(_get_player_stat(lifetime, "Total Matches", "Matches")),
+    block = {
+        "matches": _parse_stat_int(
+            _get_player_stat(lifetime, "Total Matches", "Matches", "Number of Matches", "Games")
+        ),
         "win_rate_pct": _parse_stat_float(_get_player_stat(lifetime, "Win Rate %", "Win Rate")),
-        "kd": _parse_stat_float(_get_player_stat(lifetime, "Average K/D Ratio", "K/D Ratio")),
-        "kr": _parse_stat_float(_get_player_stat(lifetime, "Average K/R Ratio", "K/R Ratio")),
-        "adr": _parse_stat_float(_get_player_stat(lifetime, "ADR", "Average Damage per Round")),
+        "kd": _parse_stat_float(
+            _get_player_stat(lifetime, "Average K/D Ratio", "Average K/D", "K/D Ratio", "KDR", "Average KDR")
+        ),
+        "kr": _extract_faceit_kr(lifetime),
+        "adr": _parse_stat_float(
+            _get_player_stat(lifetime, "ADR", "Average Damage per Round", "Damage / Round", "Average ADR")
+        ),
         "hs_pct": _parse_stat_float(
-            _get_player_stat(lifetime, "Average Headshots %", "Headshots %", "Headshot %")
+            _get_player_stat(lifetime, "Average Headshots %", "Headshots %", "Average Headshots", "Headshot %")
         ),
-        "avg_kills": _parse_stat_float(_get_player_stat(lifetime, "Average Kills", "Kills")),
-        "avg_deaths": _parse_stat_float(_get_player_stat(lifetime, "Average Deaths", "Deaths")),
-        "avg_assists": _parse_stat_float(_get_player_stat(lifetime, "Average Assists", "Assists")),
+        "avg_kills": _parse_stat_float(
+            _get_player_stat(
+                lifetime,
+                "Average Kills",
+                "Avg Kills",
+                "Kills / Match",
+                "Kills per Match",
+                "Average Kills per Match",
+            )
+        ),
+        "avg_deaths": _parse_stat_float(
+            _get_player_stat(
+                lifetime,
+                "Average Deaths",
+                "Avg Deaths",
+                "Deaths / Match",
+                "Deaths per Match",
+                "Average Deaths per Match",
+            )
+        ),
+        "avg_assists": _parse_stat_float(
+            _get_player_stat(
+                lifetime,
+                "Average Assists",
+                "Avg Assists",
+                "Assists / Match",
+                "Assists per Match",
+            )
+        ),
         "entry_success_pct": _parse_stat_float(
-            _get_player_stat(lifetime, "Entry Success Rate", "Entry Rate")
+            _get_player_stat(
+                lifetime,
+                "Entry Success Rate",
+                "Entry Rate",
+                "Entry Success Rate %",
+                "First Entry Success Rate",
+                "Entry Success %",
+            )
+            or _get_player_stat_substring(lifetime, "entry success")
         ),
-        "kast_pct": _parse_stat_float(_get_player_stat(lifetime, "KAST", "Average KAST")),
+        "kast_pct": _parse_stat_float(_get_player_stat(lifetime, "KAST", "Average KAST", "KAST %")),
+        "total_kills": _parse_stat_float(_get_player_stat(lifetime, "Total Kills", "Kills", "Kill Count")),
+        "total_deaths": _parse_stat_float(_get_player_stat(lifetime, "Total Deaths", "Deaths")),
+        "total_assists": _parse_stat_float(_get_player_stat(lifetime, "Total Assists", "Assists")),
+        "rounds": _parse_stat_float(
+            _get_player_stat(lifetime, "Rounds", "Total Rounds", "Rounds Played", "Total Rounds Played")
+            or _get_player_stat_substring(lifetime, "rounds")
+        ),
     }
+    enriched = _enrich_faceit_stat_block(block)
+    enriched.pop("total_kills", None)
+    enriched.pop("total_deaths", None)
+    enriched.pop("total_assists", None)
+    enriched.pop("rounds", None)
+    return enriched
 
 
 def _aggregate_faceit_recent(items: list, limit: int = 20) -> dict:
@@ -130,26 +259,40 @@ def _aggregate_faceit_recent(items: list, limit: int = 20) -> dict:
     if not samples:
         return {"match_count": 0}
 
-    def _avg(*keys: str) -> float | None:
+    def _avg(*keys: str, as_pct: bool = False) -> float | None:
         vals = []
         for sample in samples:
-            parsed = _parse_stat_float(_get_player_stat(sample, *keys))
+            raw = _get_player_stat(sample, *keys)
+            parsed = _normalize_rate_pct(raw) if as_pct else _parse_stat_float(raw)
             if parsed is not None:
                 vals.append(parsed)
         return round(sum(vals) / len(vals), 2) if vals else None
 
-    return {
+    block = {
         "match_count": len(samples),
-        "kd": _avg("K/D Ratio"),
-        "kr": _avg("K/R Ratio"),
-        "adr": _avg("ADR", "Average Damage per Round"),
-        "hs_pct": _avg("Headshots %", "Average Headshots %", "Headshot %"),
+        "kd": _avg("K/D Ratio", "KDR", "Average K/D Ratio"),
+        "kr": _avg(
+            "Average K/R Ratio",
+            "K/R Ratio",
+            "Average K/R",
+            "K/R",
+            "Average Kills per Round",
+            "Kills per Round",
+        ),
+        "adr": _avg("ADR", "Average Damage per Round", "Damage / Round"),
+        "hs_pct": _avg("Headshots %", "Average Headshots %", "Average Headshots", "Headshot %", as_pct=True),
         "avg_kills": _avg("Kills", "Average Kills"),
         "avg_deaths": _avg("Deaths", "Average Deaths"),
         "avg_assists": _avg("Assists", "Average Assists"),
-        "entry_success_pct": _avg("Entry Success Rate", "Entry Rate"),
-        "kast_pct": _avg("KAST"),
+        "entry_success_pct": _avg(
+            "Entry Success Rate",
+            "Entry Rate",
+            "First Entry Success Rate",
+            as_pct=True,
+        ),
+        "kast_pct": _avg("KAST", "Average KAST", as_pct=True),
     }
+    return _enrich_faceit_stat_block(block)
 
 
 def _compute_faceit_flags(lifetime: dict, recent: dict, bans: list) -> list[dict]:

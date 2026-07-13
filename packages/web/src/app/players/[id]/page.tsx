@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FaceitProfile, FaceitProfileStats } from "@/components/FaceitProfile";
 import { MatchSourceBadge } from "@/components/MatchSourceBadge";
+import { PlayerProfileDebug } from "@/components/PlayerProfileDebug";
 import { PlayerProfileLinks } from "@/components/PlayerProfileLinks";
 import { PlayerProfileSync } from "@/components/PlayerProfileSync";
 import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore, PlayerMatch } from "@/lib/api";
@@ -51,6 +52,9 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
             </div>
             <div style={{ marginTop: "0.85rem" }}>
               <PlayerProfileSync playerId={player.id} />
+            </div>
+            <div style={{ marginTop: "0.85rem" }}>
+              <PlayerProfileDebug playerId={player.id} />
             </div>
           </div>
         </div>

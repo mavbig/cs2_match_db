@@ -195,6 +195,8 @@ export const api = {
   player: (id: string) => fetchApi<PlayerDetail>(`/api/v1/players/${id}`),
   syncPlayer: (id: string) =>
     fetchApi<PlayerSyncResult>(`/api/v1/players/${id}/sync`, { method: "POST" }),
+  playerProfileDebug: (id: string) =>
+    fetchApi<Record<string, unknown>>(`/api/v1/players/${id}/profile-debug`),
   playerMatches: (id: string, limit = 100, offset = 0) =>
     fetchApi<PlayerMatch[]>(`/api/v1/players/${id}/matches?limit=${limit}&offset=${offset}`),
   playedWith: (steam64: string) => fetchApi<PlayedWith>(`/api/v1/players/by-steam/${steam64}/played-with`),

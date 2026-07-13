@@ -375,6 +375,38 @@ async def sync_player_profile(player_id: UUID, db: AsyncSession = Depends(get_db
     return PlayerSyncResultOut(**result)
 
 
+@router.get("/players/{player_id}/profile-debug")
+async def get_player_profile_debug(player_id: UUID, db: AsyncSession = Depends(get_db)):
+    player = await get_player_detail(db, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    snapshots: dict[str, dict] = {}
+    for snap in sorted(player.stat_snapshots or [], key=lambda row: row.captured_at, reverse=True):
+        if snap.source in snapshots:
+            continue
+        snapshots[snap.source] = {
+            "captured_at": snap.captured_at.isoformat(),
+            "payload": snap.payload,
+        }
+
+    return {
+        "player_id": str(player_id),
+        "steam64_id": player.steam64_id,
+        "current_name": player.current_name,
+        "platform_accounts": [
+            {
+                "platform": account.platform,
+                "external_id": account.external_id,
+                "nickname": account.nickname,
+                "profile_url": account.profile_url,
+            }
+            for account in player.platform_accounts
+        ],
+        "snapshots": snapshots,
+    }
+
+
 @router.get("/players/by-steam/{steam64_id}/played-with", response_model=PlayedWithOut)
 async def played_with(steam64_id: str, db: AsyncSession = Depends(get_db)):
     stats = await get_played_with_stats(db, steam64_id)

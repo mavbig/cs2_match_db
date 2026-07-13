@@ -22,7 +22,8 @@ def _parse_stat_int(value) -> int | None:
         return None
     if isinstance(value, (int, float)):
         return int(value)
-    m = re.search(r"\d+", str(value))
+    text = _normalize_numeric_string(value)
+    m = re.search(r"\d+", text)
     return int(m.group()) if m else None
 
 
@@ -31,8 +32,16 @@ def _parse_stat_float(value) -> float | None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    m = re.search(r"([\d.]+)", str(value).replace(",", "."))
+    text = _normalize_numeric_string(value)
+    m = re.search(r"([\d.]+)", text)
     return float(m.group(1)) if m else None
+
+
+def _normalize_numeric_string(value) -> str:
+    text = str(value).strip().replace(" ", "")
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", text):
+        return text.replace(",", "")
+    return text.replace(",", ".")
 
 
 def _get_player_stat(player_stats: dict, *keys: str):
@@ -56,6 +65,137 @@ def _get_player_stat_substring(player_stats: dict, needle: str):
         if target in str(key).lower():
             return value
     return None
+
+
+def _merge_faceit_lifetime_map(stats_response: dict | None) -> dict:
+    if not stats_response:
+        return {}
+
+    merged: dict = dict(stats_response.get("lifetime") or {})
+
+    def merge_missing(src: dict) -> None:
+        for key, value in src.items():
+            if value is None or str(value).strip() == "":
+                continue
+            label = str(key).strip()
+            if merged.get(label) in (None, ""):
+                merged[label] = value
+
+    for segment in stats_response.get("segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        label = str(segment.get("label") or "").lower()
+        seg_type = str(segment.get("type") or "").lower()
+        if label in ("overall", "total", "lifetime") or seg_type in ("overall", "total"):
+            merge_missing(segment.get("stats") or {})
+
+    if not _get_player_stat(merged, "Total Kills", "Kills", "Average Kills"):
+        totals = _aggregate_map_segment_totals(stats_response.get("segments") or [])
+        merge_missing(totals)
+
+    return merged
+
+
+def _aggregate_map_segment_totals(segments: list) -> dict:
+    total_kills = 0.0
+    total_deaths = 0.0
+    total_assists = 0.0
+    total_rounds = 0.0
+    found = False
+
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        if str(segment.get("type") or "").lower() != "map":
+            continue
+        stats = segment.get("stats") or {}
+        matches = _parse_stat_float(_get_player_stat(stats, "Matches", "Games"))
+        if not matches:
+            continue
+
+        kills = _parse_stat_float(_get_player_stat(stats, "Kills", "Total Kills"))
+        deaths = _parse_stat_float(_get_player_stat(stats, "Deaths", "Total Deaths"))
+        assists = _parse_stat_float(_get_player_stat(stats, "Assists", "Total Assists"))
+        rounds = _parse_stat_float(_get_player_stat(stats, "Rounds", "Total Rounds"))
+        avg_kills = _parse_stat_float(
+            _get_player_stat(stats, "Average Kills", "Kills / Match", "Average Kills per Match")
+        )
+        avg_deaths = _parse_stat_float(
+            _get_player_stat(stats, "Average Deaths", "Deaths / Match", "Average Deaths per Match")
+        )
+        avg_assists = _parse_stat_float(
+            _get_player_stat(stats, "Average Assists", "Assists / Match", "Average Assists per Match")
+        )
+
+        if kills is not None:
+            total_kills += kills
+        elif avg_kills is not None:
+            total_kills += avg_kills * matches
+
+        if deaths is not None:
+            total_deaths += deaths
+        elif avg_deaths is not None:
+            total_deaths += avg_deaths * matches
+
+        if assists is not None:
+            total_assists += assists
+        elif avg_assists is not None:
+            total_assists += avg_assists * matches
+
+        if rounds is not None:
+            total_rounds += rounds
+
+        found = True
+
+    if not found:
+        return {}
+
+    totals: dict[str, float] = {}
+    if total_kills > 0:
+        totals["Kills"] = round(total_kills, 2)
+    if total_deaths > 0:
+        totals["Deaths"] = round(total_deaths, 2)
+    if total_assists > 0:
+        totals["Assists"] = round(total_assists, 2)
+    if total_rounds > 0:
+        totals["Rounds"] = round(total_rounds, 2)
+    return totals
+
+
+def _build_faceit_profile_debug(
+    *,
+    faceit_player_id: str,
+    stats_response: dict | None,
+    lifetime_raw: dict,
+    lifetime_normalized: dict,
+    recent_items: list,
+) -> dict:
+    recent_stats = (recent_items[0].get("stats") or {}) if recent_items else {}
+    segments = []
+    for segment in (stats_response or {}).get("segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        stats = segment.get("stats") or {}
+        segments.append(
+            {
+                "type": segment.get("type"),
+                "label": segment.get("label"),
+                "stat_keys": sorted(stats.keys()),
+                "stats": stats,
+            }
+        )
+
+    return {
+        "faceit_player_id": faceit_player_id,
+        "stats_response_keys": sorted((stats_response or {}).keys()),
+        "api_lifetime": stats_response.get("lifetime") if stats_response else None,
+        "merged_lifetime": lifetime_raw,
+        "normalized_lifetime": lifetime_normalized,
+        "segments": segments,
+        "recent_match_stat_keys": sorted(recent_stats.keys()),
+        "recent_match_sample": recent_stats,
+        "recent_match_count": len(recent_items),
+    }
 
 
 def _normalize_rate_pct(value) -> float | None:
@@ -122,6 +262,18 @@ def _enrich_faceit_stat_block(block: dict) -> dict:
                 block["kr"] = round((float(block["avg_kills"]) * match_count) / round_count, 2)
         except (TypeError, ValueError, ZeroDivisionError):
             pass
+
+    kd = block.get("kd")
+    if kd is not None:
+        try:
+            kd_value = float(kd)
+        except (TypeError, ValueError):
+            kd_value = 0
+        if kd_value > 0:
+            if block.get("avg_kills") is None and block.get("avg_deaths") is not None:
+                block["avg_kills"] = round(kd_value * float(block["avg_deaths"]), 2)
+            if block.get("avg_deaths") is None and block.get("avg_kills") is not None:
+                block["avg_deaths"] = round(float(block["avg_kills"]) / kd_value, 2)
 
     for key in ("win_rate_pct", "hs_pct", "entry_success_pct", "kast_pct"):
         if block.get(key) is not None:
@@ -208,12 +360,15 @@ def _normalize_faceit_lifetime(lifetime: dict) -> dict:
         "kast_pct": _parse_stat_float(_get_player_stat(lifetime, "KAST", "Average KAST", "KAST %")),
         "total_kills": _parse_stat_float(
             _get_player_stat(lifetime, "Total Kills", "Kills", "Kill Count")
+            or _get_player_stat_substring(lifetime, "total kills")
         ),
         "total_deaths": _parse_stat_float(
             _get_player_stat(lifetime, "Total Deaths", "Deaths")
+            or _get_player_stat_substring(lifetime, "total deaths")
         ),
         "total_assists": _parse_stat_float(
             _get_player_stat(lifetime, "Total Assists", "Assists")
+            or _get_player_stat_substring(lifetime, "total assists")
         ),
         "rounds": _parse_stat_float(
             _get_player_stat(
@@ -223,7 +378,8 @@ def _normalize_faceit_lifetime(lifetime: dict) -> dict:
                 "Rounds Played",
                 "Total Rounds Played",
             )
-            or _get_player_stat_substring(lifetime, "rounds")
+            or _get_player_stat_substring(lifetime, "rounds played")
+            or _get_player_stat_substring(lifetime, "total rounds")
         ),
     }
     enriched = _enrich_faceit_stat_block(block)
@@ -572,15 +728,12 @@ def _build_faceit_activity(
 
 
 async def _fetch_faceit_enrichment(client: FaceitClient, faceit_player_id: str) -> dict:
-    lifetime_raw: dict = {}
     recent_items: list = []
     bans: list = []
     history_items: list = []
 
-    stats = await client.get_player_stats(faceit_player_id)
-    if stats:
-        lifetime_raw = stats.get("lifetime") or {}
-
+    stats_response = await client.get_player_stats(faceit_player_id)
+    lifetime_raw = _merge_faceit_lifetime_map(stats_response)
     lifetime = _normalize_faceit_lifetime(lifetime_raw)
     history_cap = _activity_history_cap(lifetime.get("matches"))
     stats_cap = min(history_cap, 100)
@@ -626,6 +779,13 @@ async def _fetch_faceit_enrichment(client: FaceitClient, faceit_player_id: str) 
             for b in bans
         ],
         "flags": _compute_faceit_flags(lifetime, recent_block, bans, activity),
+        "_profile_debug": _build_faceit_profile_debug(
+            faceit_player_id=faceit_player_id,
+            stats_response=stats_response,
+            lifetime_raw=lifetime_raw,
+            lifetime_normalized=lifetime,
+            recent_items=recent_items,
+        ),
     }
 
 

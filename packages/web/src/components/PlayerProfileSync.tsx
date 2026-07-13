@@ -32,13 +32,16 @@ export function PlayerProfileSync({ playerId }: { playerId: string }) {
 
   return (
     <div className="player-profile-sync">
-      <button type="button" className="btn btn-primary" onClick={handleSync} disabled={syncing}>
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={handleSync}
+        disabled={syncing}
+        title="Fetches Steam, Leetify, and FACEIT stats for this player (like csstats.gg)."
+      >
         {syncing ? "Syncing profile…" : "Sync profile"}
       </button>
-      <p className="player-profile-sync-hint">
-        Fetches Steam, Leetify, and FACEIT stats for this player (like csstats.gg).
-      </p>
-      {message && <p className="match-actions-status">{message}</p>}
+      {message && <span className="match-actions-status">{message}</span>}
     </div>
   );
 }

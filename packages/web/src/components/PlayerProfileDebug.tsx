@@ -56,16 +56,25 @@ export function PlayerProfileDebug({ playerId }: { playerId: string }) {
   return (
     <div className="player-profile-debug">
       <div className="player-profile-debug-actions">
-        <button type="button" className="btn" onClick={loadDebug} disabled={loading}>
+        <button
+          type="button"
+          className="btn"
+          onClick={loadDebug}
+          disabled={loading}
+          title="Sync profile first. Loads a debug summary showing what the UI should display for FACEIT lifetime stats."
+        >
           {loading ? "Loading debug…" : open ? "Refresh debug" : "Load profile debug"}
         </button>
-        <button type="button" className="btn" onClick={handleCopy} disabled={loading}>
+        <button
+          type="button"
+          className="btn"
+          onClick={handleCopy}
+          disabled={loading}
+          title="Copies the full debug JSON to clipboard (loads it first if needed)."
+        >
           {copied ? "Copied" : "Copy debug JSON"}
         </button>
       </div>
-      <p className="player-profile-debug-hint">
-        Sync profile first. The summary below shows what the UI should display for FACEIT lifetime stats.
-      </p>
       {error && <p className="match-actions-status">{error}</p>}
       {open && summary && (
         <div className="player-profile-debug-summary card">

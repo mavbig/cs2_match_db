@@ -37,24 +37,24 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
           )}
           <div>
             <h1 style={{ fontSize: "1.75rem", fontWeight: 700 }}>{player.current_name ?? "Unknown"}</h1>
-            <PlayerProfileLinks
-              steam64Id={player.steam64_id}
-              steamProfileUrl={player.profile_url}
-              faceit={
-                faceitProfileUrl
-                  ? { profileUrl: faceitProfileUrl, elo: faceitElo, nickname: faceit?.nickname ?? faceitAccount?.nickname }
-                  : null
-              }
-              leetifyAvailable={Boolean(leetify)}
-            />
+            <div className="player-header-actions-row">
+              <PlayerProfileLinks
+                steam64Id={player.steam64_id}
+                steamProfileUrl={player.profile_url}
+                faceit={
+                  faceitProfileUrl
+                    ? { profileUrl: faceitProfileUrl, elo: faceitElo, nickname: faceit?.nickname ?? faceitAccount?.nickname }
+                    : null
+                }
+                leetifyAvailable={Boolean(leetify)}
+              />
+              <div className="player-header-actions">
+                <PlayerProfileSync playerId={player.id} />
+                <PlayerProfileDebug playerId={player.id} />
+              </div>
+            </div>
             <div style={{ marginTop: "0.35rem", fontSize: "0.85rem", color: "var(--muted)", fontFamily: "monospace" }}>
               {player.steam64_id}
-            </div>
-            <div style={{ marginTop: "0.85rem" }}>
-              <PlayerProfileSync playerId={player.id} />
-            </div>
-            <div style={{ marginTop: "0.85rem" }}>
-              <PlayerProfileDebug playerId={player.id} />
             </div>
           </div>
         </div>
@@ -86,26 +86,6 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
       {faceit && <FaceitProfile faceit={faceit} />}
 
       {leetify && <LeetifyProfile leetify={leetify} />}
-
-      {player.platform_accounts.length > 0 && (
-        <div className="card" style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Linked Accounts</h2>
-          {player.platform_accounts
-            .filter((a) => a.platform !== "faceit")
-            .map((a) => (
-            <div key={a.external_id} style={{ marginBottom: "0.5rem" }}>
-              <span className="badge">{a.platform}</span>{" "}
-              {a.profile_url ? (
-                <a href={a.profile_url} target="_blank" rel="noopener noreferrer">
-                  {a.nickname ?? a.external_id}
-                </a>
-              ) : (
-                a.nickname ?? a.external_id
-              )}
-            </div>
-          ))}
-        </div>
-      )}
 
       {player.name_history.length > 0 && (
         <div className="card" style={{ marginBottom: "1.5rem" }}>

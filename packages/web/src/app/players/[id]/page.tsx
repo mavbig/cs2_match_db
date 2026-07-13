@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FaceitProfile, FaceitProfileStats } from "@/components/FaceitProfile";
+import { PlayerProfileLinks } from "@/components/PlayerProfileLinks";
 import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore, PlayerMatch } from "@/lib/api";
 
 export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
@@ -16,6 +17,10 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   const leetify = player.latest_stats.leetify as Record<string, unknown> | undefined;
   const rating = leetify?.rating as Record<string, number> | undefined;
   const faceit = player.latest_stats.faceit as FaceitProfileStats | undefined;
+  const faceitAccount = player.platform_accounts.find((a) => a.platform === "faceit");
+  const faceitProfileUrl =
+    faceit?.profile_url ?? faceitAccount?.profile_url ?? null;
+  const faceitElo = faceit?.elo ?? null;
 
   return (
     <div>
@@ -29,11 +34,18 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
           )}
           <div>
             <h1 style={{ fontSize: "1.75rem", fontWeight: 700 }}>{player.current_name ?? "Unknown"}</h1>
-            <div style={{ display: "flex", gap: "1rem", marginTop: "0.35rem", fontSize: "0.9rem" }}>
-              <a href={player.profile_url ?? "#"} target="_blank" rel="noopener noreferrer">
-                Steam Profile
-              </a>
-              <span style={{ color: "var(--muted)", fontFamily: "monospace" }}>{player.steam64_id}</span>
+            <PlayerProfileLinks
+              steam64Id={player.steam64_id}
+              steamProfileUrl={player.profile_url}
+              faceit={
+                faceitProfileUrl
+                  ? { profileUrl: faceitProfileUrl, elo: faceitElo, nickname: faceit?.nickname ?? faceitAccount?.nickname }
+                  : null
+              }
+              leetifyAvailable={Boolean(leetify)}
+            />
+            <div style={{ marginTop: "0.35rem", fontSize: "0.85rem", color: "var(--muted)", fontFamily: "monospace" }}>
+              {player.steam64_id}
             </div>
           </div>
         </div>
@@ -80,8 +92,10 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
       {player.platform_accounts.length > 0 && (
         <div className="card" style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Platform Accounts</h2>
-          {player.platform_accounts.map((a) => (
+          <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Linked Accounts</h2>
+          {player.platform_accounts
+            .filter((a) => a.platform !== "faceit")
+            .map((a) => (
             <div key={a.external_id} style={{ marginBottom: "0.5rem" }}>
               <span className="badge">{a.platform}</span>{" "}
               {a.profile_url ? (

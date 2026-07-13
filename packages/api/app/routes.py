@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+import logging
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -51,6 +52,7 @@ from app.services.leetify_sync import extract_demo_url_from_gc, import_leetify_p
 from app.services.steam_client import SteamClient
 
 router = APIRouter(prefix="/api/v1", tags=["api"])
+logger = logging.getLogger(__name__)
 
 
 async def enqueue_player_enrichment(player_id: UUID) -> None:
@@ -65,6 +67,12 @@ async def enqueue_player_enrichment(player_id: UUID) -> None:
 def verify_sync_token(x_sync_token: str = Header(...)) -> None:
     if x_sync_token != settings.api_sync_token:
         raise HTTPException(status_code=401, detail="Invalid sync token")
+
+
+def _steam_profile_url(steam64_id: str, stored: str | None = None) -> str:
+    if stored and stored.startswith("http"):
+        return stored
+    return f"https://steamcommunity.com/profiles/{steam64_id}"
 
 
 def _match_to_out(match: Match) -> MatchOut:
@@ -259,7 +267,20 @@ async def get_match(match_id: UUID, db: AsyncSession = Depends(get_db)):
 @router.get("/players", response_model=SearchResultOut)
 async def search_players_route(q: str = Query(..., min_length=1), db: AsyncSession = Depends(get_db)):
     players = await search_players(db, q)
-    return SearchResultOut(players=[PlayerOut.model_validate(p) for p in players])
+    return SearchResultOut(
+        players=[
+            PlayerOut(
+                id=p.id,
+                steam64_id=p.steam64_id,
+                current_name=p.current_name,
+                avatar_url=p.avatar_url,
+                profile_url=_steam_profile_url(p.steam64_id, p.profile_url),
+                first_seen_at=p.first_seen_at,
+                last_seen_at=p.last_seen_at,
+            )
+            for p in players
+        ]
+    )
 
 
 @router.get("/players/{player_id}", response_model=PlayerDetailOut)
@@ -286,7 +307,7 @@ async def get_player(player_id: UUID, db: AsyncSession = Depends(get_db)):
         steam64_id=player.steam64_id,
         current_name=player.current_name,
         avatar_url=player.avatar_url,
-        profile_url=player.profile_url,
+        profile_url=_steam_profile_url(player.steam64_id, player.profile_url),
         first_seen_at=player.first_seen_at,
         last_seen_at=player.last_seen_at,
         name_history=[h.name for h in player.name_history],
@@ -404,7 +425,7 @@ async def lookup_player(body: PlayerLookupIn, db: AsyncSession = Depends(get_db)
         steam64_id=detail.steam64_id,
         current_name=detail.current_name,
         avatar_url=detail.avatar_url,
-        profile_url=detail.profile_url,
+        profile_url=_steam_profile_url(detail.steam64_id, detail.profile_url),
         first_seen_at=detail.first_seen_at,
         last_seen_at=detail.last_seen_at,
         name_history=[h.name for h in detail.name_history],
@@ -554,8 +575,10 @@ async def import_leetify(db: AsyncSession = Depends(get_db)):
     if not leetify_key:
         raise HTTPException(status_code=400, detail="Leetify API key not configured")
 
+    logger.info("Starting Leetify profile import for %s", my_steam64)
     result = await import_leetify_profile(db, my_steam64, leetify_key)
     await db.commit()
+    logger.info("Leetify profile import API finished: %s", result)
     return result
 
 

@@ -12,10 +12,22 @@ export function SteamIcon({ size = 18 }: { size?: number }) {
 export function LeetifyIcon({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="provider-icon">
-      <rect x="3" y="3" width="18" height="18" rx="4" fill="#F84982" opacity="0.22" />
+      <rect x="3" y="3" width="18" height="18" rx="4" fill="currentColor" opacity="0.22" />
       <path
-        fill="#F84982"
+        fill="currentColor"
         d="M7 16V8h2.2l2.4 4.6L14 8h2.2v8h-1.8v-4.8L11.2 16H9.8L7.8 11.2V16H7zm8.5 0V8H19v8h-3.5z"
+      />
+    </svg>
+  );
+}
+
+export function FaceitIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="provider-icon">
+      <rect x="3" y="3" width="18" height="18" rx="4" fill="currentColor" opacity="0.22" />
+      <path
+        fill="currentColor"
+        d="M7.5 7h9v2.2h-3.4V17H10.9V9.2H7.5V7zm5.8 0H19v2.2h-2.1l1.4 3.6 1.4-3.6H19V17h-2.2v-5.8L15.4 17h-1.8l-1.4-3.6L10.8 17H8.6l2.1-5.3L7.5 7h5.8z"
       />
     </svg>
   );

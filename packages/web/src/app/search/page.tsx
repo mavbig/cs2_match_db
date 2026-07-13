@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { PlayerProfileLinks } from "@/components/PlayerProfileLinks";
 import { api, formatDate, Player, PlayerDetail } from "@/lib/api";
 
 export default function SearchPage() {
@@ -68,9 +69,17 @@ export default function SearchPage() {
               <h2 style={{ fontSize: "1.25rem" }}>
                 <Link href={`/players/${lookup.id}`}>{lookup.current_name ?? lookup.steam64_id}</Link>
               </h2>
-              <a href={lookup.profile_url ?? "#"} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.85rem" }}>
-                Steam Profile
-              </a>
+              <PlayerProfileLinks
+                steam64Id={lookup.steam64_id}
+                steamProfileUrl={lookup.profile_url}
+                faceit={(() => {
+                  const acct = lookup.platform_accounts.find((a) => a.platform === "faceit");
+                  const faceit = lookup.latest_stats.faceit as { profile_url?: string; elo?: number; nickname?: string } | undefined;
+                  const url = faceit?.profile_url ?? acct?.profile_url;
+                  return url ? { profileUrl: url, elo: faceit?.elo, nickname: faceit?.nickname ?? acct?.nickname } : null;
+                })()}
+                leetifyAvailable={Boolean(lookup.latest_stats.leetify)}
+              />
             </div>
           </div>
 

@@ -440,8 +440,10 @@ async def create_match_from_leetify(db: AsyncSession, leetify_data: dict, my_ste
 
 async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str) -> dict:
     client = LeetifyClient(api_key)
+    logger.info("Leetify import: fetching match history for %s", steam64_id)
     entries = await client.get_all_profile_matches(steam64_id)
     if entries is None:
+        logger.warning("Leetify import: profile/matches returned nothing for %s", steam64_id)
         return {
             "total": 0,
             "imported": 0,
@@ -450,11 +452,12 @@ async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str
             "error": "Could not fetch Leetify profile matches (check API key and profile privacy)",
         }
 
+    logger.info("Leetify import: processing %d matches", len(entries))
     imported = 0
     updated = 0
     failed = 0
 
-    for entry in entries:
+    for idx, entry in enumerate(entries, start=1):
         try:
             data = entry
             if not entry.get("stats") and entry.get("id"):
@@ -473,6 +476,24 @@ async def import_leetify_profile(db: AsyncSession, steam64_id: str, api_key: str
             logger.exception("Failed to import Leetify match %s", entry.get("id"))
             failed += 1
 
+        if idx % 25 == 0:
+            await db.commit()
+            logger.info(
+                "Leetify import progress: %d/%d (%d new, %d updated, %d failed)",
+                idx,
+                len(entries),
+                imported,
+                updated,
+                failed,
+            )
+
+    logger.info(
+        "Leetify import finished: %d total, %d new, %d updated, %d failed",
+        len(entries),
+        imported,
+        updated,
+        failed,
+    )
     return {
         "total": len(entries),
         "imported": imported,

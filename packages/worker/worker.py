@@ -849,7 +849,8 @@ async def sync_leetify_matches(ctx):
 
 
 async def import_leetify_profile(ctx):
-    async with httpx.AsyncClient(base_url=settings.api_internal_url, timeout=600.0) as client:
+    logger.info("Leetify profile import job started")
+    async with httpx.AsyncClient(base_url=settings.api_internal_url, timeout=7200.0) as client:
         try:
             resp = await client.post("/api/v1/import/leetify")
             if resp.is_success:

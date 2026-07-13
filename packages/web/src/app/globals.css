@@ -191,6 +191,64 @@ a:hover {
   color: var(--text);
 }
 
+.profile-links {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.profile-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.profile-link.is-available {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.profile-link.is-available:hover {
+  background: var(--surface3);
+  border-color: var(--border-strong);
+}
+
+.profile-link.is-unavailable {
+  opacity: 0.38;
+  color: var(--muted);
+  cursor: not-allowed;
+  background: var(--surface);
+}
+
+.profile-link-label {
+  line-height: 1;
+}
+
+.profile-link-faceit.is-available {
+  border-color: rgba(255, 85, 0, 0.35);
+}
+
+.profile-link-faceit.is-available:hover {
+  background: rgba(255, 85, 0, 0.08);
+}
+
+.profile-link-leetify.is-available {
+  border-color: rgba(248, 73, 130, 0.35);
+}
+
+.profile-link-leetify.is-available:hover {
+  background: rgba(248, 73, 130, 0.08);
+}
+
 .match-actions-status {
   color: var(--muted);
   font-size: 0.85rem;

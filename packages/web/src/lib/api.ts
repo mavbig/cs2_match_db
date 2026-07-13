@@ -121,6 +121,12 @@ export interface MatchSyncResult {
   sync_status: MatchSyncStatus;
 }
 
+export interface PlayerSyncResult {
+  player_id: string;
+  sources: string[];
+  errors: string[];
+}
+
 export interface PlayerDetail extends Player {
   name_history: string[];
   platform_accounts: { platform: string; external_id: string; nickname: string | null; profile_url: string | null }[];
@@ -187,6 +193,8 @@ export const api = {
   matchDemoUrl: (id: string) => fetchApi<{ demo_url: string }>(`/api/v1/matches/${id}/demo-url`),
   searchPlayers: (q: string) => fetchApi<{ players: Player[] }>(`/api/v1/players?q=${encodeURIComponent(q)}`),
   player: (id: string) => fetchApi<PlayerDetail>(`/api/v1/players/${id}`),
+  syncPlayer: (id: string) =>
+    fetchApi<PlayerSyncResult>(`/api/v1/players/${id}/sync`, { method: "POST" }),
   playerMatches: (id: string, limit = 100, offset = 0) =>
     fetchApi<PlayerMatch[]>(`/api/v1/players/${id}/matches?limit=${limit}&offset=${offset}`),
   playedWith: (steam64: string) => fetchApi<PlayedWith>(`/api/v1/players/by-steam/${steam64}/played-with`),

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { FaceitProfile, FaceitProfileStats } from "@/components/FaceitProfile";
 import { MatchSourceBadge } from "@/components/MatchSourceBadge";
 import { PlayerProfileLinks } from "@/components/PlayerProfileLinks";
+import { PlayerProfileSync } from "@/components/PlayerProfileSync";
 import { api, formatDate, formatMap, formatMatchLabel, formatMatchScore, PlayerMatch } from "@/lib/api";
 
 export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
@@ -48,6 +49,9 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
             <div style={{ marginTop: "0.35rem", fontSize: "0.85rem", color: "var(--muted)", fontFamily: "monospace" }}>
               {player.steam64_id}
             </div>
+            <div style={{ marginTop: "0.85rem" }}>
+              <PlayerProfileSync playerId={player.id} />
+            </div>
           </div>
         </div>
       </div>
@@ -77,17 +81,36 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
       {faceit && <FaceitProfile faceit={faceit} />}
 
-      {rating && (
+      {leetify && (
         <div className="card" style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Leetify Ratings</h2>
-          <div className="stat-grid">
-            {Object.entries(rating).map(([key, val]) => (
-              <div key={key} className="stat-box">
-                <div className="value">{typeof val === "number" ? Math.round(val) : "—"}</div>
-                <div className="label">{key.replace(/_/g, " ")}</div>
+          <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <MatchSourceBadge source="leetify" size={22} />
+            Leetify
+          </h2>
+          <div className="stat-grid" style={{ marginBottom: rating ? "1rem" : 0 }}>
+            {leetify.total_matches != null && (
+              <div className="stat-box">
+                <div className="value">{String(leetify.total_matches)}</div>
+                <div className="label">Matches</div>
               </div>
-            ))}
+            )}
+            {leetify.winrate != null && (
+              <div className="stat-box">
+                <div className="value">{Math.round(Number(leetify.winrate) * 100)}%</div>
+                <div className="label">Winrate</div>
+              </div>
+            )}
           </div>
+          {rating && (
+            <div className="stat-grid">
+              {Object.entries(rating).map(([key, val]) => (
+                <div key={key} className="stat-box">
+                  <div className="value">{typeof val === "number" ? Math.round(val) : "—"}</div>
+                  <div className="label">{key.replace(/_/g, " ")}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

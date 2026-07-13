@@ -1,4 +1,4 @@
-import { FaceitIcon, LeetifyIcon, SteamIcon } from "@/components/ProviderIcons";
+import { ProviderIcon } from "@/components/ProviderIcon";
 
 export interface PlayerProfileLinkData {
   steam64Id: string;
@@ -30,7 +30,6 @@ export function PlayerProfileLinks({
 }: PlayerProfileLinkData) {
   const steamHref = steamUrl(steam64Id, steamProfileUrl);
   const hasFaceit = Boolean(faceit?.profileUrl);
-  const hasLeetify = Boolean(leetifyAvailable);
 
   return (
     <div className="profile-links">
@@ -41,7 +40,7 @@ export function PlayerProfileLinks({
         className="profile-link is-available"
         title="Steam profile"
       >
-        <SteamIcon size={20} />
+        <ProviderIcon provider="steam" size={20} />
         <span className="profile-link-label">Steam</span>
       </a>
 
@@ -53,35 +52,28 @@ export function PlayerProfileLinks({
           className="profile-link is-available profile-link-faceit"
           title={faceit!.elo != null ? `FACEIT — ${faceit!.elo} ELO` : "FACEIT profile"}
         >
-          <FaceitIcon size={20} />
+          <ProviderIcon provider="faceit" size={20} />
           <span className="profile-link-label">
             FACEIT{faceit!.elo != null ? ` · ${faceit!.elo}` : ""}
           </span>
         </a>
       ) : (
         <span className="profile-link is-unavailable" title="No FACEIT profile linked">
-          <FaceitIcon size={20} />
+          <ProviderIcon provider="faceit" size={20} />
           <span className="profile-link-label">FACEIT</span>
         </span>
       )}
 
-      {hasLeetify ? (
-        <a
-          href={leetifyUrl(steam64Id)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="profile-link is-available profile-link-leetify"
-          title="View on Leetify"
-        >
-          <LeetifyIcon size={20} />
-          <span className="profile-link-label">Leetify</span>
-        </a>
-      ) : (
-        <span className="profile-link is-unavailable" title="No Leetify data for this player">
-          <LeetifyIcon size={20} />
-          <span className="profile-link-label">Leetify</span>
-        </span>
-      )}
+      <a
+        href={leetifyUrl(steam64Id)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`profile-link is-available profile-link-leetify${leetifyAvailable ? "" : " profile-link-leetify-muted"}`}
+        title={leetifyAvailable ? "View on Leetify" : "View on Leetify (stats not synced yet)"}
+      >
+        <ProviderIcon provider="leetify" size={20} />
+        <span className="profile-link-label">Leetify</span>
+      </a>
     </div>
   );
 }

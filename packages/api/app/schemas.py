@@ -25,6 +25,12 @@ class MatchSyncStatusOut(BaseModel):
     leetify_synced_at: datetime | None = None
 
 
+class PlayerSyncResultOut(BaseModel):
+    player_id: UUID
+    sources: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 class MatchIngestIn(BaseModel):
     source: str = "steam_gc"
     source_match_id: str

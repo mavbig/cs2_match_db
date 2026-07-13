@@ -23,6 +23,7 @@ from app.schemas import (
     PlayerLookupIn,
     PlayerMatchOut,
     PlayerOut,
+    PlayerSyncResultOut,
     SearchResultOut,
     SettingsOut,
     SettingsUpdateIn,
@@ -49,6 +50,7 @@ from app.services.match_service import (
 )
 from app.services.enrichment import get_match_sync_status
 from app.services.leetify_sync import extract_demo_url_from_gc, import_leetify_profile, sync_match_from_sources
+from app.services.player_enrichment import enrich_player_profile
 from app.services.secret_store import get_leetify_session_token, save_leetify_session_token
 from app.services.steam_client import SteamClient
 
@@ -361,6 +363,16 @@ async def list_player_matches(
             )
         )
     return out
+
+
+@router.post("/players/{player_id}/sync", response_model=PlayerSyncResultOut)
+async def sync_player_profile(player_id: UUID, db: AsyncSession = Depends(get_db)):
+    try:
+        result = await enrich_player_profile(db, player_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await db.commit()
+    return PlayerSyncResultOut(**result)
 
 
 @router.get("/players/by-steam/{steam64_id}/played-with", response_model=PlayedWithOut)

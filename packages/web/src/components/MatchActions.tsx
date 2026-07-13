@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
-import { LeetifyIcon, SteamIcon } from "@/components/ProviderIcons";
+import { ProviderIcon } from "@/components/ProviderIcon";
 import { api, formatRelativeTime, type MatchSyncStatus } from "@/lib/api";
 
 interface MatchActionsProps {
@@ -104,14 +104,14 @@ export function MatchActions({ matchId, demoUrl, source, syncStatus }: MatchActi
               label="Steam"
               synced={status.steam_synced}
               syncedAt={status.steam_synced_at}
-              icon={<SteamIcon />}
+              icon={<ProviderIcon provider="steam" size={18} />}
             />
           )}
           <SyncBadge
             label="Leetify"
             synced={status.leetify_synced}
             syncedAt={status.leetify_synced_at}
-            icon={<LeetifyIcon />}
+            icon={<ProviderIcon provider="leetify" size={18} />}
           />
         </div>
       </div>

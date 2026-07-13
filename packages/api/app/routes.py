@@ -403,7 +403,22 @@ async def get_player_profile_debug(player_id: UUID, db: AsyncSession = Depends(g
             }
             for account in player.platform_accounts
         ],
+        "summary": _build_profile_debug_summary(snapshots),
         "snapshots": snapshots,
+    }
+
+
+def _build_profile_debug_summary(snapshots: dict[str, dict]) -> dict:
+    faceit_snap = snapshots.get("faceit") or {}
+    faceit_payload = faceit_snap.get("payload") or {}
+    faceit_debug = faceit_payload.get("_profile_debug") or {}
+    return {
+        "faceit_captured_at": faceit_snap.get("captured_at"),
+        "faceit_lifetime_in_snapshot": faceit_payload.get("lifetime"),
+        "faceit_recent_in_snapshot": faceit_payload.get("recent_20"),
+        "faceit_normalized_lifetime": faceit_debug.get("normalized_lifetime"),
+        "faceit_api_lifetime_keys": sorted((faceit_debug.get("api_lifetime") or {}).keys()),
+        "faceit_merged_lifetime_keys": sorted((faceit_debug.get("merged_lifetime") or {}).keys()),
     }
 
 

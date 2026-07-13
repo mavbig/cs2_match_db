@@ -291,6 +291,12 @@ a:hover {
   word-break: break-word;
 }
 
+.player-profile-debug-summary {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.85rem 1rem;
+}
+
 .profile-link-faceit.is-available {
   border-color: rgba(255, 85, 0, 0.35);
 }

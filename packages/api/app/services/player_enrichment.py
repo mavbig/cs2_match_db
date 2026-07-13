@@ -93,7 +93,41 @@ def _merge_faceit_lifetime_map(stats_response: dict | None) -> dict:
         totals = _aggregate_map_segment_totals(stats_response.get("segments") or [])
         merge_missing(totals)
 
+    segments = stats_response.get("segments") or []
+    weighted_fields = (
+        ("Average K/R Ratio", ("Average K/R Ratio",)),
+        ("Average Kills", ("Average Kills", "Kills / Match", "Average Kills per Match")),
+        ("Average Deaths", ("Average Deaths", "Deaths / Match", "Average Deaths per Match")),
+        ("Average Assists", ("Average Assists", "Assists / Match", "Average Assists per Match")),
+    )
+    for target_key, source_keys in weighted_fields:
+        if _get_player_stat(merged, target_key, *source_keys) is None:
+            average = _weighted_segment_average(segments, *source_keys)
+            if average is not None:
+                merged[target_key] = average
+
     return merged
+
+
+def _weighted_segment_average(segments: list, *keys: str) -> float | None:
+    total_matches = 0.0
+    weighted_sum = 0.0
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        if str(segment.get("type") or "").lower() != "map":
+            continue
+        stats = segment.get("stats") or {}
+        matches = _parse_stat_float(
+            _get_player_stat(stats, "Matches", "Games", "Total Matches")
+        )
+        value = _parse_stat_float(_get_player_stat(stats, *keys))
+        if matches and value is not None:
+            weighted_sum += value * matches
+            total_matches += matches
+    if total_matches <= 0:
+        return None
+    return round(weighted_sum / total_matches, 2)
 
 
 def _aggregate_map_segment_totals(segments: list) -> dict:

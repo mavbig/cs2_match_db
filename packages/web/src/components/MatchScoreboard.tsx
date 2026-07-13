@@ -66,8 +66,8 @@ function PlayerTable({
             <td style={{ textAlign: "center" }}>
               {p.is_me ? (
                 "—"
-              ) : (p.times_played_with_me ?? 0) > 0 ? (
-                <span className="badge" title={`${p.times_played_with_me} matches with you`}>
+              ) : (p.times_played_with_me ?? 0) > 1 ? (
+                <span className="badge" title={`${p.times_played_with_me} matches with you (including this one)`}>
                   ✓
                 </span>
               ) : (

@@ -211,7 +211,13 @@ async def import_csstats_stub(
             csstats_match_id=stub.match_id,
         )
 
-    steam_names = await fetch_steam_persona_names(db, [p.steam64_id for p in data.players])
+    steam_names: dict[str, str] = {}
+    if data.players:
+        try:
+            steam_names = await fetch_steam_persona_names(db, [p.steam64_id for p in data.players])
+        except Exception as exc:
+            logger.warning("Steam name lookup failed during csstats stub import: %s", exc)
+
     match, created = await ingest_match(db, data, steam_names=steam_names)
     return match, created, "imported" if created else "updated"
 
@@ -221,9 +227,9 @@ async def import_csstats_profile_from_html(
     html: str,
     steam64_id: str,
     *,
-    cookie: str | None = None,
     limit: int | None = None,
 ) -> dict:
+    """Import match list from saved /stats HTML without live csstats fetches (stub rows only)."""
     stubs = parse_csstats_profile_stats_html(html)
     if limit is not None:
         stubs = stubs[:limit]
@@ -238,11 +244,13 @@ async def import_csstats_profile_from_html(
             "error": "No matches found in pasted csstats profile HTML",
         }
 
-    cookie = cookie or await _get_csstats_cookie(db)
-    client = CsstatsClient(cookie=cookie, request_delay_ms=settings.csstats_request_delay_ms) if cookie else None
     my_steam64 = await get_my_steam64_id(db)
+    logger.info(
+        "csstats profile HTML import: %d matches, stub-only (no live fetches)",
+        len(stubs),
+    )
 
-    imported = updated = skipped = failed = stub_only = 0
+    imported = updated = skipped = failed = 0
 
     for idx, stub in enumerate(stubs, start=1):
         try:
@@ -250,20 +258,11 @@ async def import_csstats_profile_from_html(
                 db,
                 CsstatsMatchSummary(match_id=stub.match_id, map=stub.map, played_at=stub.played_at),
             )
-            if existing and existing.source == "csstats" and len(existing.players) >= 10:
+            if existing and len(existing.players) >= 2:
                 skipped += 1
                 continue
 
-            created = False
-            if client:
-                try:
-                    _, created, _ = await import_csstats_match_by_id(db, client, stub.match_id)
-                except CsstatsFetchError:
-                    _, created, _ = await import_csstats_stub(db, stub, my_steam64)
-                    stub_only += 1
-            else:
-                _, created, _ = await import_csstats_stub(db, stub, my_steam64)
-                stub_only += 1
+            _, created, _ = await import_csstats_stub(db, stub, my_steam64)
 
             if created:
                 imported += 1
@@ -272,23 +271,30 @@ async def import_csstats_profile_from_html(
 
             if idx % COMMIT_EVERY == 0:
                 await db.commit()
+                logger.info(
+                    "csstats profile HTML progress: %d/%d (%d new, %d skipped, %d failed)",
+                    idx,
+                    len(stubs),
+                    imported,
+                    skipped,
+                    failed,
+                )
         except Exception as exc:
             failed += 1
             logger.warning("csstats profile HTML import failed for %s: %s", stub.match_id, exc)
 
     await db.commit()
-    msg = f"{imported} new, {updated} updated, {skipped} skipped, {failed} failed"
-    if stub_only:
-        msg += f", {stub_only} imported from profile rows only (no full scoreboard)"
-    msg += f" out of {len(stubs)} matches"
     return {
         "total": len(stubs),
         "imported": imported,
         "updated": updated,
         "skipped": skipped,
         "failed": failed,
-        "stub_only": stub_only,
-        "message": msg,
+        "stub_only": imported + updated,
+        "message": (
+            f"{imported} new, {updated} updated, {skipped} skipped (already in DB), "
+            f"{failed} failed out of {len(stubs)} — profile rows only, no full scoreboards"
+        ),
     }
 
 

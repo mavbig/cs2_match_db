@@ -421,8 +421,12 @@ export default function SettingsPage() {
             style={{ fontFamily: "monospace", fontSize: "0.8rem" }}
           />
           <button type="button" className="btn" onClick={importCsstatsProfileHtml} disabled={loading}>
-            Import from Profile HTML
+            Import from Profile HTML (metadata only)
           </button>
+          <p style={{ color: "var(--muted)", fontSize: "0.8rem", margin: 0, lineHeight: 1.5 }}>
+            Profile HTML only adds matches missing from Leetify/Steam (your stats per row, not full scoreboards).
+            Skip this if Leetify import already covered your history. Use match HTML paste above for 10-player boards.
+          </p>
         </div>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>

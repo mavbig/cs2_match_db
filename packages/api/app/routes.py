@@ -793,9 +793,8 @@ async def import_csstats_profile_html(body: CsstatsProfileHtmlImportIn, db: Asyn
     if not my_steam64:
         raise HTTPException(status_code=400, detail="Configure your Steam64 ID in settings first")
 
-    cookie = await get_setting(db, "csstats_cookie") or settings.csstats_cookie
     logger.info("Starting csstats profile HTML import for %s", my_steam64)
-    result = await import_csstats_profile_from_html(db, body.html, my_steam64, cookie=cookie or None)
+    result = await import_csstats_profile_from_html(db, body.html, my_steam64)
     await db.commit()
     logger.info("csstats profile HTML import finished: %s", result)
     return result

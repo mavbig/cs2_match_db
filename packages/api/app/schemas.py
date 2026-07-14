@@ -82,6 +82,7 @@ class MatchOut(BaseModel):
     sync_status: MatchSyncStatusOut = Field(default_factory=MatchSyncStatusOut)
     leetify_url: str | None = None
     faceit_url: str | None = None
+    csstats_url: str | None = None
     players: list[MatchPlayerOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
@@ -178,6 +179,11 @@ class SettingsUpdateIn(BaseModel):
     faceit_nickname: str | None = None
     leetify_api_key: str | None = None
     leetify_session_token: str | None = None
+    csstats_cookie: str | None = None
+
+
+class CsstatsMatchImportIn(BaseModel):
+    url_or_id: str
 
 
 class SettingsOut(BaseModel):
@@ -189,6 +195,7 @@ class SettingsOut(BaseModel):
     faceit_nickname: str | None = None
     leetify_api_key_set: bool = False
     leetify_session_token_set: bool = False
+    csstats_cookie_set: bool = False
     onboarding_complete: bool = False
 
 

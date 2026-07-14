@@ -28,6 +28,7 @@ from app.schemas import (
     SettingsOut,
     SettingsUpdateIn,
     ShareCodeImportIn,
+    CsstatsMatchImportIn,
     SyncJobOut,
     SyncStatusOut,
     MatchSyncStatusOut,
@@ -51,6 +52,9 @@ from app.services.match_service import (
 )
 from app.services.enrichment import get_match_external_urls, get_match_sync_status
 from app.services.leetify_sync import extract_demo_url_from_gc, import_leetify_profile, sync_match_from_sources
+from app.services.csstats_parser import extract_csstats_match_id
+from app.services.csstats_sync import import_csstats_match_by_id, import_csstats_profile
+from app.services.csstats_client import CsstatsClient
 from app.services.player_enrichment import enrich_player_profile
 from app.services.secret_store import get_leetify_session_token, save_leetify_session_token
 from app.services.steam_client import SteamClient
@@ -628,6 +632,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
     faceit_nick = await get_setting(db, "faceit_nickname") or settings.faceit_nickname
     leetify_key = await get_setting(db, "leetify_api_key") or settings.leetify_api_key
     leetify_session = await get_leetify_session_token(db)
+    csstats_cookie = await get_setting(db, "csstats_cookie") or settings.csstats_cookie
     my_id = await get_my_steam64_id(db)
 
     onboarding = bool(my_id and auth and share)
@@ -640,6 +645,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         faceit_nickname=faceit_nick or None,
         leetify_api_key_set=bool(leetify_key),
         leetify_session_token_set=bool(leetify_session),
+        csstats_cookie_set=bool(csstats_cookie),
         onboarding_complete=onboarding,
     )
 
@@ -662,12 +668,14 @@ async def update_settings(body: SettingsUpdateIn, db: AsyncSession = Depends(get
         await set_setting(db, "leetify_api_key", body.leetify_api_key)
     if body.leetify_session_token is not None:
         await save_leetify_session_token(db, body.leetify_session_token)
+    if body.csstats_cookie is not None:
+        await set_setting(db, "csstats_cookie", body.csstats_cookie.strip() or None)
     return await get_settings(db)
 
 
 @router.post("/sync/trigger/{job_type}", response_model=SyncJobOut)
 async def trigger_sync(job_type: str, db: AsyncSession = Depends(get_db)):
-    if job_type not in ("steam_gc", "faceit", "enrichment", "leetify", "leetify_import"):
+    if job_type not in ("steam_gc", "faceit", "enrichment", "leetify", "leetify_import", "csstats_import"):
         raise HTTPException(status_code=400, detail="Invalid job type")
     job = await create_sync_job(db, job_type)
 
@@ -684,6 +692,8 @@ async def trigger_sync(job_type: str, db: AsyncSession = Depends(get_db)):
             await arq_redis.enqueue_job("sync_leetify_matches")
         elif job_type == "leetify_import":
             await arq_redis.enqueue_job("import_leetify_profile", str(job.id))
+        elif job_type == "csstats_import":
+            await arq_redis.enqueue_job("import_csstats_profile", str(job.id))
         await arq_redis.aclose()
     except Exception:
         pass
@@ -706,6 +716,51 @@ async def import_leetify(db: AsyncSession = Depends(get_db)):
     await db.commit()
     logger.info("Leetify profile import API finished: %s", result)
     return result
+
+
+@router.post("/import/csstats")
+async def import_csstats(db: AsyncSession = Depends(get_db)):
+    my_steam64 = await get_my_steam64_id(db)
+    if not my_steam64:
+        raise HTTPException(status_code=400, detail="Configure your Steam64 ID in settings first")
+
+    cookie = await get_setting(db, "csstats_cookie") or settings.csstats_cookie
+    if not cookie:
+        raise HTTPException(
+            status_code=400,
+            detail="csstats Cookie not configured — paste it from browser DevTools in Settings",
+        )
+
+    logger.info("Starting csstats profile import for %s", my_steam64)
+    result = await import_csstats_profile(db, my_steam64, cookie=cookie)
+    await db.commit()
+    logger.info("csstats profile import finished: %s", result)
+    return result
+
+
+@router.post("/import/csstats/match")
+async def import_csstats_match(body: CsstatsMatchImportIn, db: AsyncSession = Depends(get_db)):
+    match_id = extract_csstats_match_id(body.url_or_id)
+    if not match_id:
+        raise HTTPException(status_code=400, detail="Invalid csstats match URL or ID")
+
+    cookie = await get_setting(db, "csstats_cookie") or settings.csstats_cookie
+    client = CsstatsClient(cookie=cookie, request_delay_ms=0)
+
+    try:
+        match, created, action = await import_csstats_match_by_id(db, client, match_id)
+    except Exception as exc:
+        logger.warning("csstats single match import failed for %s: %s", match_id, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    await db.commit()
+    loaded = await get_match_with_players(db, match.id)
+    return {
+        "match_id": str(match.id),
+        "csstats_match_id": match_id,
+        "action": action,
+        "player_count": len(loaded.players) if loaded else 0,
+    }
 
 
 @router.get("/sync/jobs", response_model=list[SyncJobOut])

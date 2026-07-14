@@ -70,4 +70,16 @@ def get_match_external_urls(match) -> dict[str, str | None]:
         f"https://www.faceit.com/en/cs2/room/{faceit_match_id}/scoreboard" if faceit_match_id else None
     )
 
-    return {"leetify_url": leetify_url, "faceit_url": faceit_url}
+    csstats_match_id = enrichment.get("csstats_match_id")
+    if not csstats_match_id and match.source == "csstats":
+        csstats_match_id = match.source_match_id
+    if not csstats_match_id:
+        csstats_match_id = (match.raw_payload or {}).get("csstats_match_id")
+
+    csstats_url = f"https://csstats.gg/match/{csstats_match_id}" if csstats_match_id else None
+
+    return {
+        "leetify_url": leetify_url,
+        "faceit_url": faceit_url,
+        "csstats_url": csstats_url,
+    }

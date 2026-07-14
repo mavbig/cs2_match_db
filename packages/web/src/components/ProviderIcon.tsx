@@ -3,6 +3,7 @@ export const PROVIDER_ICONS: Record<string, { src: string; label: string }> = {
   steam_gc: { src: "/icons/steam.svg", label: "Steam" },
   faceit: { src: "/icons/faceit.svg", label: "FACEIT" },
   leetify: { src: "/icons/leetify.svg", label: "Leetify" },
+  csstats: { src: "https://csstats.gg/favicon.ico", label: "csstats.gg" },
 };
 
 export function ProviderIcon({

@@ -42,8 +42,10 @@ export default function SettingsPage() {
     faceit_nickname: "",
     leetify_api_key: "",
     leetify_session_token: "",
+    csstats_cookie: "",
   });
   const [shareCode, setShareCode] = useState("");
+  const [csstatsMatchUrl, setCsstatsMatchUrl] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -65,6 +67,7 @@ export default function SettingsPage() {
       if (form.faceit_nickname) payload.faceit_nickname = form.faceit_nickname;
       if (form.leetify_api_key) payload.leetify_api_key = form.leetify_api_key;
       if (form.leetify_session_token) payload.leetify_session_token = form.leetify_session_token;
+      if (form.csstats_cookie) payload.csstats_cookie = form.csstats_cookie;
 
       const updated = await api.updateSettings(payload);
       setSettings(updated);
@@ -111,6 +114,9 @@ export default function SettingsPage() {
       } else if (type === "leetify_import") {
         setMessage("Leetify import started — fetching your match history…");
         void pollSyncJob(job.id, "Leetify import");
+      } else if (type === "csstats_import") {
+        setMessage("csstats import started — this may take hours for large histories…");
+        void pollSyncJob(job.id, "csstats import");
       } else if (type === "faceit") {
         setMessage("FACEIT sync started — this may take 30+ minutes…");
         void pollSyncJob(job.id, "FACEIT sync");
@@ -134,6 +140,24 @@ export default function SettingsPage() {
       setShareCode("");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Import failed");
+    }
+  }
+
+  async function importCsstatsMatch() {
+    if (!csstatsMatchUrl.trim()) return;
+    setMessage(null);
+    setLoading(true);
+    try {
+      const res = await api.importCsstatsMatch(csstatsMatchUrl.trim());
+      setMessage(
+        `csstats match ${res.csstats_match_id} ${res.action} (${res.player_count} players). ` +
+          `View: /matches/${res.match_id}`
+      );
+      setCsstatsMatchUrl("");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "csstats import failed");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -289,6 +313,24 @@ export default function SettingsPage() {
               full <code>Authorization</code> header.
             </p>
           </label>
+
+          <label>
+            <div style={{ marginBottom: "0.35rem", fontSize: "0.85rem", color: "var(--muted)" }}>
+              csstats Cookie (profile import){" "}
+              {settings?.csstats_cookie_set && <span className="badge badge-green">set</span>}
+            </div>
+            <input
+              className="input"
+              type="password"
+              placeholder="Paste Cookie header from csstats.gg DevTools"
+              value={form.csstats_cookie}
+              onChange={(e) => setForm({ ...form, csstats_cookie: e.target.value })}
+            />
+            <p style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: "0.35rem", lineHeight: 1.5 }}>
+              Required for bulk import from your csstats profile. While logged into csstats.gg, open DevTools →
+              Network → any csstats.gg request → copy the full <code>Cookie</code> header value.
+            </p>
+          </label>
         </div>
 
         <button type="submit" className="btn btn-primary" style={{ marginTop: "1.25rem" }} disabled={loading}>
@@ -314,12 +356,31 @@ export default function SettingsPage() {
           <button type="button" className="btn btn-primary" onClick={() => triggerSync("leetify_import")}>
             Import all from Leetify
           </button>
+          <button type="button" className="btn btn-primary" onClick={() => triggerSync("csstats_import")}>
+            Import all from csstats
+          </button>
         </div>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
           Leetify import walks your full history in ~6-month windows (like the website), stores match metadata and your stats.
           Use &quot;Enrich existing matches&quot; separately for full scoreboards and player names. Requires session
           token + API key.
         </p>
+        <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
+          csstats import fetches your profile match list, then loads each match page for the full 10-player scoreboard.
+          Requires csstats Cookie above. ~1.5s per match — a 2,700-match history takes ~1 hour.
+        </p>
+
+        <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem" }}>
+          <input
+            className="input"
+            placeholder="https://csstats.gg/match/141190943"
+            value={csstatsMatchUrl}
+            onChange={(e) => setCsstatsMatchUrl(e.target.value)}
+          />
+          <button type="button" className="btn btn-primary" onClick={importCsstatsMatch} disabled={loading}>
+            Import csstats Match
+          </button>
+        </div>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>
           <input

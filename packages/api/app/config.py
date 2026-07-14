@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     leetify_history_months: int = 36  # legacy alias: used as years-back cap (months / 12)
     steam_auth_code: str = ""
     steam_oldest_share_code: str = ""
+    csstats_cookie: str = ""
+    csstats_request_delay_ms: int = 1500
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

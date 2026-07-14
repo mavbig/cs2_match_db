@@ -109,6 +109,7 @@ export interface MatchDetail extends MatchSummary {
   demo_url: string | null;
   leetify_url: string | null;
   faceit_url: string | null;
+  csstats_url: string | null;
   sync_status: MatchSyncStatus;
   players: MatchPlayer[];
 }
@@ -187,6 +188,7 @@ export interface Settings {
   faceit_nickname: string | null;
   leetify_api_key_set: boolean;
   leetify_session_token_set: boolean;
+  csstats_cookie_set: boolean;
   onboarding_complete: boolean;
 }
 
@@ -227,6 +229,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ share_code }),
     }),
+  importCsstatsMatch: (url_or_id: string) =>
+    fetchApi<{ match_id: string; csstats_match_id: string; action: string; player_count: number }>(
+      "/api/v1/import/csstats/match",
+      {
+        method: "POST",
+        body: JSON.stringify({ url_or_id }),
+      }
+    ),
 };
 
 export function formatDate(iso: string | null): string {

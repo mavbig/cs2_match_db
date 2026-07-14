@@ -1061,6 +1061,76 @@ async def import_leetify_profile(ctx, sync_job_id: str | None = None):
                     await session.commit()
 
 
+async def import_csstats_profile(ctx, sync_job_id: str | None = None):
+    from sqlalchemy import text
+
+    logger.info("csstats profile import job started (sync_job_id=%s)", sync_job_id)
+    job_id = sync_job_id
+    if job_id:
+        async with Session() as session:
+            await session.execute(
+                text("UPDATE sync_jobs SET status = 'running' WHERE id = :id"),
+                {"id": job_id},
+            )
+            await session.commit()
+
+    async with httpx.AsyncClient(base_url=settings.api_internal_url, timeout=7200.0) as client:
+        try:
+            resp = await client.post("/api/v1/import/csstats")
+            if resp.is_success:
+                result = resp.json()
+                if result.get("error"):
+                    msg = str(result["error"])
+                elif result.get("message"):
+                    msg = str(result["message"])
+                else:
+                    msg = f"{result.get('imported', 0)} new, {result.get('updated', 0)} updated"
+                logger.info("csstats profile import: %s", msg)
+                if job_id:
+                    async with Session() as session:
+                        await session.execute(
+                            text(
+                                "UPDATE sync_jobs SET status = 'completed', finished_at = :now, "
+                                "matches_imported = :n, error_message = :msg WHERE id = :id"
+                            ),
+                            {
+                                "now": datetime.now(timezone.utc),
+                                "n": (
+                                    result.get("imported", 0)
+                                    + result.get("updated", 0)
+                                ),
+                                "msg": msg,
+                                "id": job_id,
+                            },
+                        )
+                        await session.commit()
+            else:
+                err = resp.text[:500]
+                logger.warning("csstats profile import HTTP %s: %s", resp.status_code, err)
+                if job_id:
+                    async with Session() as session:
+                        await session.execute(
+                            text(
+                                "UPDATE sync_jobs SET status = 'failed', finished_at = :now, "
+                                "error_message = :msg WHERE id = :id"
+                            ),
+                            {"now": datetime.now(timezone.utc), "msg": err, "id": job_id},
+                        )
+                        await session.commit()
+        except Exception as exc:
+            logger.exception("csstats profile import failed")
+            if job_id:
+                async with Session() as session:
+                    await session.execute(
+                        text(
+                            "UPDATE sync_jobs SET status = 'failed', finished_at = :now, "
+                            "error_message = :msg WHERE id = :id"
+                        ),
+                        {"now": datetime.now(timezone.utc), "msg": str(exc), "id": job_id},
+                    )
+                    await session.commit()
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     job_timeout = 7200
@@ -1071,6 +1141,7 @@ class WorkerSettings:
         run_enrichment_batch,
         func(sync_leetify_matches, timeout=1800),
         func(import_leetify_profile, timeout=7200),
+        func(import_csstats_profile, timeout=7200),
     ]
     cron_jobs = [
         cron(sync_faceit_matches, hour={0, 6, 12, 18}, minute=0),

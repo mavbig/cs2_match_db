@@ -11,3 +11,4 @@ redis==5.2.1
 arq==0.26.1
 python-multipart==0.0.20
 psycopg2-binary==2.9.10
+beautifulsoup4==4.12.3

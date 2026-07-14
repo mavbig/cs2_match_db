@@ -59,7 +59,11 @@ export default async function MatchDetailPage({
           <span>Score: {formatMatchScore(match.source, match.score_team_a, match.score_team_b)}</span>
           <MatchSourceBadge source={match.source} size={24} />
           {match.mode && <span className="badge badge-orange">{match.mode}</span>}
-          <MatchExternalLinks leetifyUrl={match.leetify_url} faceitUrl={match.faceit_url} />
+          <MatchExternalLinks
+            leetifyUrl={match.leetify_url}
+            faceitUrl={match.faceit_url}
+            csstatsUrl={match.csstats_url}
+          />
           {match.source === "steam_gc" && (
             <Link href={showDebug ? `/matches/${id}` : `/matches/${id}?debug=1`} className="btn btn-ghost" style={{ padding: "0.25rem 0.6rem", fontSize: "0.8rem" }}>
               {showDebug ? "Hide debug" : "Show GC debug"}

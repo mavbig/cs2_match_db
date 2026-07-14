@@ -25,6 +25,9 @@ from app.services.match_service import fetch_steam_persona_names, get_my_steam64
 logger = logging.getLogger(__name__)
 
 COMMIT_EVERY = 25
+
+
+def _summary_to_ingest(
     summary: CsstatsMatchSummary,
     *,
     source: str,

@@ -229,14 +229,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ share_code }),
     }),
-  importCsstatsMatch: (url_or_id: string) =>
+  importCsstatsMatch: (payload: { url_or_id?: string; html?: string }) =>
     fetchApi<{ match_id: string; csstats_match_id: string; action: string; player_count: number }>(
       "/api/v1/import/csstats/match",
       {
         method: "POST",
-        body: JSON.stringify({ url_or_id }),
+        body: JSON.stringify(payload),
       }
     ),
+  importCsstatsProfileHtml: (html: string) =>
+    fetchApi<Record<string, unknown>>("/api/v1/import/csstats/profile-html", {
+      method: "POST",
+      body: JSON.stringify({ html }),
+    }),
 };
 
 export function formatDate(iso: string | null): string {

@@ -183,7 +183,12 @@ class SettingsUpdateIn(BaseModel):
 
 
 class CsstatsMatchImportIn(BaseModel):
-    url_or_id: str
+    url_or_id: str | None = None
+    html: str | None = None
+
+
+class CsstatsProfileHtmlImportIn(BaseModel):
+    html: str
 
 
 class SettingsOut(BaseModel):

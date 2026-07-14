@@ -46,6 +46,8 @@ export default function SettingsPage() {
   });
   const [shareCode, setShareCode] = useState("");
   const [csstatsMatchUrl, setCsstatsMatchUrl] = useState("");
+  const [csstatsMatchHtml, setCsstatsMatchHtml] = useState("");
+  const [csstatsProfileHtml, setCsstatsProfileHtml] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -144,18 +146,37 @@ export default function SettingsPage() {
   }
 
   async function importCsstatsMatch() {
-    if (!csstatsMatchUrl.trim()) return;
+    if (!csstatsMatchHtml.trim() && !csstatsMatchUrl.trim()) return;
     setMessage(null);
     setLoading(true);
     try {
-      const res = await api.importCsstatsMatch(csstatsMatchUrl.trim());
+      const res = await api.importCsstatsMatch({
+        url_or_id: csstatsMatchUrl.trim() || undefined,
+        html: csstatsMatchHtml.trim() || undefined,
+      });
       setMessage(
         `csstats match ${res.csstats_match_id} ${res.action} (${res.player_count} players). ` +
           `View: /matches/${res.match_id}`
       );
       setCsstatsMatchUrl("");
+      setCsstatsMatchHtml("");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "csstats import failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function importCsstatsProfileHtml() {
+    if (!csstatsProfileHtml.trim()) return;
+    setMessage(null);
+    setLoading(true);
+    try {
+      const res = await api.importCsstatsProfileHtml(csstatsProfileHtml.trim());
+      setMessage(typeof res.message === "string" ? res.message : "csstats profile HTML import finished.");
+      setCsstatsProfileHtml("");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "csstats profile HTML import failed");
     } finally {
       setLoading(false);
     }
@@ -367,18 +388,40 @@ export default function SettingsPage() {
         </p>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
           csstats import fetches your profile match list, then loads each match page for the full 10-player scoreboard.
-          Requires csstats Cookie above. ~1.5s per match — a 2,700-match history takes ~1 hour.
+          Cloudflare often blocks server requests from datacenter IPs — if fetch fails, paste saved HTML instead (see below).
         </p>
 
-        <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem" }}>
+        <div style={{ display: "grid", gap: "0.75rem", marginBottom: "1rem" }}>
           <input
             className="input"
-            placeholder="https://csstats.gg/match/141190943"
+            placeholder="https://csstats.gg/match/141190943 (optional if HTML pasted)"
             value={csstatsMatchUrl}
             onChange={(e) => setCsstatsMatchUrl(e.target.value)}
           />
+          <textarea
+            className="input"
+            placeholder="Paste saved match page HTML here (Ctrl+S on match page, or DevTools → Save response)"
+            value={csstatsMatchHtml}
+            onChange={(e) => setCsstatsMatchHtml(e.target.value)}
+            rows={4}
+            style={{ fontFamily: "monospace", fontSize: "0.8rem" }}
+          />
           <button type="button" className="btn btn-primary" onClick={importCsstatsMatch} disabled={loading}>
             Import csstats Match
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gap: "0.75rem", marginBottom: "1rem" }}>
+          <textarea
+            className="input"
+            placeholder="Paste saved profile /stats HTML for bulk import (your stats.txt file contents)"
+            value={csstatsProfileHtml}
+            onChange={(e) => setCsstatsProfileHtml(e.target.value)}
+            rows={4}
+            style={{ fontFamily: "monospace", fontSize: "0.8rem" }}
+          />
+          <button type="button" className="btn" onClick={importCsstatsProfileHtml} disabled={loading}>
+            Import from Profile HTML
           </button>
         </div>
 

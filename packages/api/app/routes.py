@@ -29,6 +29,7 @@ from app.schemas import (
     SettingsUpdateIn,
     ShareCodeImportIn,
     CsstatsMatchImportIn,
+    CsstatsProfileHtmlImportIn,
     SyncJobOut,
     SyncStatusOut,
     MatchSyncStatusOut,
@@ -53,8 +54,13 @@ from app.services.match_service import (
 from app.services.enrichment import get_match_external_urls, get_match_sync_status
 from app.services.leetify_sync import extract_demo_url_from_gc, import_leetify_profile, sync_match_from_sources
 from app.services.csstats_parser import extract_csstats_match_id
-from app.services.csstats_sync import import_csstats_match_by_id, import_csstats_profile
-from app.services.csstats_client import CsstatsClient
+from app.services.csstats_sync import (
+    import_csstats_match_by_id,
+    import_csstats_match_from_html,
+    import_csstats_profile,
+    import_csstats_profile_from_html,
+)
+from app.services.csstats_client import CsstatsClient, CsstatsFetchError
 from app.services.player_enrichment import enrich_player_profile
 from app.services.secret_store import get_leetify_session_token, save_leetify_session_token
 from app.services.steam_client import SteamClient
@@ -740,27 +746,59 @@ async def import_csstats(db: AsyncSession = Depends(get_db)):
 
 @router.post("/import/csstats/match")
 async def import_csstats_match(body: CsstatsMatchImportIn, db: AsyncSession = Depends(get_db)):
-    match_id = extract_csstats_match_id(body.url_or_id)
-    if not match_id:
-        raise HTTPException(status_code=400, detail="Invalid csstats match URL or ID")
+    html = (body.html or "").strip()
+    csstats_match_id: str | None = None
 
-    cookie = await get_setting(db, "csstats_cookie") or settings.csstats_cookie
-    client = CsstatsClient(cookie=cookie, request_delay_ms=0)
+    if html:
+        csstats_match_id = extract_csstats_match_id(body.url_or_id or "") or extract_csstats_match_id(html)
+        try:
+            match, created, action = await import_csstats_match_from_html(db, html, csstats_match_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("csstats HTML match import failed: %s", exc)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif body.url_or_id:
+        csstats_match_id = extract_csstats_match_id(body.url_or_id)
+        if not csstats_match_id:
+            raise HTTPException(status_code=400, detail="Invalid csstats match URL or ID")
 
-    try:
-        match, created, action = await import_csstats_match_by_id(db, client, match_id)
-    except Exception as exc:
-        logger.warning("csstats single match import failed for %s: %s", match_id, exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        cookie = await get_setting(db, "csstats_cookie") or settings.csstats_cookie
+        client = CsstatsClient(cookie=cookie, request_delay_ms=0)
+
+        try:
+            match, created, action = await import_csstats_match_by_id(db, client, csstats_match_id)
+        except CsstatsFetchError as exc:
+            logger.warning("csstats single match import blocked for %s: %s", csstats_match_id, exc)
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("csstats single match import failed for %s: %s", csstats_match_id, exc)
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    else:
+        raise HTTPException(status_code=400, detail="Provide url_or_id or html")
 
     await db.commit()
     loaded = await get_match_with_players(db, match.id)
     return {
         "match_id": str(match.id),
-        "csstats_match_id": match_id,
+        "csstats_match_id": csstats_match_id,
         "action": action,
         "player_count": len(loaded.players) if loaded else 0,
     }
+
+
+@router.post("/import/csstats/profile-html")
+async def import_csstats_profile_html(body: CsstatsProfileHtmlImportIn, db: AsyncSession = Depends(get_db)):
+    my_steam64 = await get_my_steam64_id(db)
+    if not my_steam64:
+        raise HTTPException(status_code=400, detail="Configure your Steam64 ID in settings first")
+
+    cookie = await get_setting(db, "csstats_cookie") or settings.csstats_cookie
+    logger.info("Starting csstats profile HTML import for %s", my_steam64)
+    result = await import_csstats_profile_from_html(db, body.html, my_steam64, cookie=cookie or None)
+    await db.commit()
+    logger.info("csstats profile HTML import finished: %s", result)
+    return result
 
 
 @router.get("/sync/jobs", response_model=list[SyncJobOut])

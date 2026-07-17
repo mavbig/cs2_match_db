@@ -56,6 +56,11 @@ export default async function DashboardPage() {
         <div className="stat-box">
           <div className="value">{sync_status.steam_configured ? "✓" : "—"}</div>
           <div className="label">Steam Sync</div>
+          {sync_status.last_steam_sync && (
+            <div className="label" style={{ marginTop: "0.35rem", fontSize: "0.75rem" }}>
+              Last: {formatDate(sync_status.last_steam_sync)}
+            </div>
+          )}
         </div>
         <div className="stat-box">
           <div className="value">{sync_status.faceit_configured ? "✓" : "—"}</div>

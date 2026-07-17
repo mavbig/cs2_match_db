@@ -208,6 +208,10 @@ class ShareCodeImportIn(BaseModel):
     share_code: str
 
 
+class LastShareCodeIn(BaseModel):
+    share_code: str
+
+
 class PlayerLookupIn(BaseModel):
     steam_url_or_id: str
 

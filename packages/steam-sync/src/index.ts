@@ -1,10 +1,11 @@
-import { ackForceFullSync, completeJob, fetchSyncConfig, postMatches, startJob } from "./api-poster.js";
+import { ackForceFullSync, completeJob, fetchSyncConfig, postMatches, saveLastSyncedShareCode, startJob } from "./api-poster.js";
 import { GcClient } from "./gc-client.js";
 import { getAccountName, getClientRefreshToken, getSharedSecret, getRefreshToken, isClientRefreshToken, isThrottleError, loadMaFile, throttleBackoffMs } from "./mafile.js";
 import { getNextMatchSharingCode, ShareCodeChainEnd } from "./steam-api.js";
 
 const POLL_INTERVAL = Number(process.env.SYNC_POLL_INTERVAL ?? 300) * 1000;
 const TRIGGER_CHECK_INTERVAL = Number(process.env.SYNC_TRIGGER_CHECK_INTERVAL ?? 15) * 1000;
+const INCREMENTAL_MAX_MATCHES = Number(process.env.SYNC_INCREMENTAL_MAX_MATCHES ?? 20);
 
 const BOT_USERNAME = process.env.STEAM_BOT_USERNAME ?? "";
 const BOT_PASSWORD = process.env.STEAM_BOT_PASSWORD ?? "";
@@ -13,6 +14,23 @@ const BOT_SHARED_SECRET = process.env.STEAM_BOT_SHARED_SECRET ?? "";
 let gcClient: GcClient | null = null;
 let lastSyncedShareCode: string | null = null;
 let loginBlockedUntil = 0;
+
+async function rememberShareCode(shareCode: string | null | undefined): Promise<void> {
+  if (!shareCode) return;
+  lastSyncedShareCode = shareCode;
+  try {
+    await saveLastSyncedShareCode(shareCode);
+  } catch (err) {
+    console.warn("[steam-sync] Failed to persist last share code:", err instanceof Error ? err.message : err);
+  }
+}
+
+function resolveKnownShareCode(config: {
+  steam_oldest_share_code: string;
+  last_synced_share_code?: string | null;
+}): string {
+  return lastSyncedShareCode ?? config.last_synced_share_code ?? config.steam_oldest_share_code;
+}
 
 async function ensureGcConnected(): Promise<GcClient> {
   if (Date.now() < loginBlockedUntil) {
@@ -94,7 +112,8 @@ async function runFullSync(): Promise<number> {
         const result = await postMatches(batch);
         imported += result.created + result.updated;
       }
-      lastSyncedShareCode = matches[0]?.share_code ?? lastSyncedShareCode;
+      lastSyncedShareCode = matches[matches.length - 1]?.share_code ?? lastSyncedShareCode;
+      await rememberShareCode(lastSyncedShareCode);
     }
 
     if (jobId) await completeJob(jobId, imported);
@@ -112,38 +131,50 @@ async function runIncrementalSync(): Promise<number> {
   const config = await fetchSyncConfig();
   if (!config?.steam_auth_code || !config?.my_steam64_id || !config.steam_api_key) return 0;
 
+  if (config.last_synced_share_code && !lastSyncedShareCode) {
+    lastSyncedShareCode = config.last_synced_share_code;
+  }
+
   const jobId = await startJob("steam_gc");
   let imported = 0;
 
   try {
     const client = await ensureGcConnected();
 
-    const knownCode = lastSyncedShareCode ?? config.steam_oldest_share_code;
+    let knownCode = resolveKnownShareCode(config);
     if (!knownCode) return 0;
 
-    let nextCode: string;
-    try {
-      nextCode = await getNextMatchSharingCode(
-        config.steam_api_key,
-        config.my_steam64_id,
-        config.steam_auth_code,
-        knownCode
-      );
-    } catch (err) {
-      if (err instanceof ShareCodeChainEnd) {
-        console.log(`[steam-sync] No new matches since ${knownCode}`);
-        if (jobId) await completeJob(jobId, 0);
-        return 0;
+    for (let step = 0; step < INCREMENTAL_MAX_MATCHES; step++) {
+      let nextCode: string;
+      try {
+        nextCode = await getNextMatchSharingCode(
+          config.steam_api_key,
+          config.my_steam64_id,
+          config.steam_auth_code,
+          knownCode
+        );
+      } catch (err) {
+        if (err instanceof ShareCodeChainEnd) {
+          if (step === 0) {
+            console.log(`[steam-sync] No new matches since ${knownCode}`);
+          } else {
+            console.log(`[steam-sync] Incremental sync caught up (${imported} new)`);
+          }
+          break;
+        }
+        throw err;
       }
-      throw err;
-    }
 
-    console.log(`[steam-sync] New match share code: ${nextCode}`);
-    const match = await client.fetchMatchByShareCode(nextCode, config.my_steam64_id);
-    if (match) {
-      const result = await postMatches([match]);
-      imported = result.created + result.updated;
-      lastSyncedShareCode = match.share_code;
+      console.log(`[steam-sync] New match share code: ${nextCode}`);
+      const match = await client.fetchMatchByShareCode(nextCode, config.my_steam64_id);
+      if (match?.share_code) {
+        const result = await postMatches([match]);
+        imported += result.created + result.updated;
+        knownCode = match.share_code;
+        await rememberShareCode(match.share_code);
+      } else {
+        break;
+      }
     }
 
     if (jobId) await completeJob(jobId, imported);
@@ -173,6 +204,9 @@ async function main(): Promise<void> {
   while (true) {
     try {
       const config = await fetchSyncConfig();
+      if (config?.last_synced_share_code && !lastSyncedShareCode) {
+        lastSyncedShareCode = config.last_synced_share_code;
+      }
       const forceFull = Boolean(config?.force_full_sync);
       const due = Date.now() - lastSyncRun >= POLL_INTERVAL;
 

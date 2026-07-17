@@ -8,6 +8,7 @@ export async function fetchSyncConfig(): Promise<{
   steam_auth_code: string;
   steam_oldest_share_code: string;
   steam_api_key: string;
+  last_synced_share_code?: string | null;
   force_full_sync?: boolean;
 } | null> {
   try {
@@ -60,6 +61,17 @@ export async function ackForceFullSync(): Promise<void> {
   await fetch(`${API_URL}/api/v1/sync/ack-force-full`, {
     method: "POST",
     headers: { "X-Sync-Token": SYNC_TOKEN },
+  });
+}
+
+export async function saveLastSyncedShareCode(shareCode: string): Promise<void> {
+  await fetch(`${API_URL}/api/v1/sync/last-share-code`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Sync-Token": SYNC_TOKEN,
+    },
+    body: JSON.stringify({ share_code: shareCode }),
   });
 }
 

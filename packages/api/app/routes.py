@@ -28,6 +28,7 @@ from app.schemas import (
     SettingsOut,
     SettingsUpdateIn,
     ShareCodeImportIn,
+    LastShareCodeIn,
     CsstatsMatchImportIn,
     CsstatsProfileHtmlImportIn,
     SyncJobOut,
@@ -814,8 +815,18 @@ async def sync_config(db: AsyncSession = Depends(get_db), _: None = Depends(veri
         "steam_auth_code": await get_setting(db, "steam_auth_code") or settings.steam_auth_code,
         "steam_oldest_share_code": await get_setting(db, "steam_oldest_share_code") or settings.steam_oldest_share_code,
         "steam_api_key": await get_setting(db, "steam_api_key") or settings.steam_api_key,
+        "last_synced_share_code": await get_setting(db, "last_synced_share_code"),
         "force_full_sync": force_full == "1",
     }
+
+
+@router.post("/sync/last-share-code", dependencies=[Depends(verify_sync_token)])
+async def save_last_share_code(body: LastShareCodeIn, db: AsyncSession = Depends(get_db)):
+    code = body.share_code.strip()
+    if not code.upper().startswith("CSGO"):
+        raise HTTPException(status_code=400, detail="Invalid share code")
+    await set_setting(db, "last_synced_share_code", code)
+    return {"ok": True, "share_code": code}
 
 
 @router.post("/sync/ack-force-full", dependencies=[Depends(verify_sync_token)])

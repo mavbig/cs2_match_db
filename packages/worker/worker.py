@@ -953,42 +953,99 @@ async def run_enrichment_batch(ctx):
         await enrich_player(ctx, pid)
 
 
-async def sync_leetify_matches(ctx):
+async def _list_pending_leetify_match_ids(
+    *,
+    lookback_days: int | None = None,
+    limit: int | None = None,
+) -> list[str]:
+    """Return match IDs that still need Leetify enrichment."""
     from sqlalchemy import text
+
+    lookback = lookback_days if lookback_days is not None else settings.leetify_auto_sync_lookback_days
+    batch_limit = limit if limit is not None else settings.leetify_auto_sync_limit
 
     async with Session() as session:
         result = await session.execute(
             text(
                 """
                 SELECT id FROM matches
-                WHERE share_code IS NOT NULL
-                   OR source = 'faceit'
+                WHERE source IN ('steam_gc', 'faceit')
+                  AND (share_code IS NOT NULL OR source = 'faceit')
+                  AND (
+                    raw_payload IS NULL
+                    OR raw_payload->'_enrichment'->>'leetify_synced_at' IS NULL
+                  )
+                  AND (
+                    played_at IS NULL
+                    OR played_at >= NOW() - make_interval(days => :lookback_days)
+                  )
                 ORDER BY played_at DESC NULLS LAST
+                LIMIT :limit
                 """
-            )
+            ),
+            {"lookback_days": lookback, "limit": batch_limit},
         )
-        match_ids = [str(row[0]) for row in result.fetchall()]
+        return [str(row[0]) for row in result.fetchall()]
 
+
+async def _sync_leetify_match_ids(match_ids: list[str], *, label: str) -> tuple[int, int]:
     if not match_ids:
-        logger.info("Leetify bulk sync: no matches to process")
-        return
+        logger.info("%s: no matches to process", label)
+        return 0, 0
 
     synced = 0
     failed = 0
+    delay_s = max(0, settings.leetify_auto_sync_delay_ms) / 1000.0
+
     async with httpx.AsyncClient(base_url=settings.api_internal_url, timeout=120.0) as client:
-        for match_id in match_ids:
+        for idx, match_id in enumerate(match_ids):
             try:
                 resp = await client.post(f"/api/v1/matches/{match_id}/sync")
                 if resp.is_success:
-                    synced += 1
+                    body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                    sources = body.get("sources") or []
+                    if "leetify" in sources:
+                        synced += 1
+                        logger.info("%s: enriched %s via Leetify", label, match_id)
+                    else:
+                        failed += 1
+                        errors = body.get("errors") or []
+                        logger.info(
+                            "%s: match %s not ready yet (%s)",
+                            label,
+                            match_id,
+                            "; ".join(errors) if errors else "no leetify data",
+                        )
                 else:
                     failed += 1
-                    logger.warning("Leetify sync HTTP %s for match %s", resp.status_code, match_id)
+                    logger.warning("%s: HTTP %s for match %s", label, resp.status_code, match_id)
             except Exception as exc:
                 failed += 1
-                logger.warning("Leetify sync failed for match %s: %s", match_id, exc)
+                logger.warning("%s: failed for match %s: %s", label, match_id, exc)
 
-    logger.info("Leetify bulk sync finished: %d ok, %d failed, %d total", synced, failed, len(match_ids))
+            if delay_s and idx + 1 < len(match_ids):
+                await asyncio.sleep(delay_s)
+
+    logger.info("%s finished: %d enriched, %d pending/failed, %d total", label, synced, failed, len(match_ids))
+    return synced, failed
+
+
+async def sync_leetify_matches(ctx):
+    """Manual bulk enrich: recent matches still missing Leetify data."""
+    match_ids = await _list_pending_leetify_match_ids(
+        lookback_days=max(settings.leetify_auto_sync_lookback_days, 90),
+        limit=max(settings.leetify_auto_sync_limit, 50),
+    )
+    await _sync_leetify_match_ids(match_ids, label="Leetify bulk sync")
+
+
+async def auto_sync_leetify_pending(ctx):
+    """Cron: enrich newly imported Steam/FACEIT matches once Leetify has them."""
+    match_ids = await _list_pending_leetify_match_ids()
+    if not match_ids:
+        return
+    logger.info("Leetify auto-sync: %d pending match(es)", len(match_ids))
+    await _sync_leetify_match_ids(match_ids, label="Leetify auto-sync")
 
 
 async def import_leetify_profile(ctx, sync_job_id: str | None = None):
@@ -1140,10 +1197,12 @@ class WorkerSettings:
         process_enrichment_jobs,
         run_enrichment_batch,
         func(sync_leetify_matches, timeout=1800),
+        func(auto_sync_leetify_pending, timeout=600),
         func(import_leetify_profile, timeout=7200),
         func(import_csstats_profile, timeout=7200),
     ]
     cron_jobs = [
         cron(sync_faceit_matches, hour={0, 6, 12, 18}, minute=0),
         cron(process_enrichment_jobs, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+        cron(auto_sync_leetify_pending, minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57}),
     ]

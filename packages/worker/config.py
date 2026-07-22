@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     my_steam64_id: str = ""
     api_internal_url: str = "http://api:8000"
     faceit_sync_max_matches: int = 2000
+    leetify_auto_sync_limit: int = 10
+    leetify_auto_sync_lookback_days: int = 14
+    leetify_auto_sync_delay_ms: int = 1500
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

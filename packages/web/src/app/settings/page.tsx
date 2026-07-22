@@ -382,9 +382,9 @@ export default function SettingsPage() {
           </button>
         </div>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
-          Leetify import walks your full history in ~6-month windows (like the website), stores match metadata and your stats.
-          Use &quot;Enrich existing matches&quot; separately for full scoreboards and player names. Requires session
-          token + API key.
+          New Steam/FACEIT matches are auto-enriched with Leetify about every 5 minutes (map, scores, demo link)
+          once Leetify finishes analyzing them. Use &quot;Enrich existing matches&quot; to backfill older ones.
+          Leetify full import walks history in ~6-month windows; requires API key (+ session token for full history).
         </p>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
           csstats import fetches your profile match list, then loads each match page for the full 10-player scoreboard.
